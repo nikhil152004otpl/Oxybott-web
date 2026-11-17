@@ -1,0 +1,384 @@
+// Oxybott Prisma Schema for PostgreSQL
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model AdminUser {
+  id           Int       @id @default(autoincrement())
+  username     String    @unique @db.VarChar(100)
+  email        String    @unique @db.VarChar(255)
+  passwordHash String    @map("password_hash") @db.VarChar(255)
+  role         String    @default("admin") @db.VarChar(50)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
+
+  @@map("admin_users")
+}
+
+model Category {
+  id          Int               @id @default(autoincrement())
+  name        String            @db.VarChar(150)
+  slug        String            @unique @db.VarChar(150)
+  description String?           @db.Text
+  imageUrl    String?           @map("image_url") @db.VarChar(500)
+  sortOrder   Int               @default(0) @map("sort_order")
+  isPublished Boolean           @default(true) @map("is_published")
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  products    ProductCategory[]
+
+  @@map("categories")
+}
+
+model Product {
+  id                String                 @id @db.VarChar(100)
+  slug              String                 @unique @db.VarChar(150)
+  sku               String                 @unique @db.VarChar(100)
+  name              String                 @db.VarChar(255)
+  shortName         String                 @map("short_name") @db.VarChar(150)
+  tagline           String?                @db.Text
+  description       String?                @db.Text
+  series            String?                @db.VarChar(100)
+  age               String?                @db.VarChar(50)
+  grade             String?                @db.VarChar(50)
+  price             Decimal                @db.Decimal(10, 2)
+  salePrice         Decimal?               @map("sale_price") @db.Decimal(10, 2)
+  stockQuantity     Int                    @default(100) @map("stock_quantity")
+  lowStockThreshold Int                    @default(5) @map("low_stock_threshold")
+  isPublished       Boolean                @default(true) @map("is_published")
+  isFeatured        Boolean                @default(false) @map("is_featured")
+  badge             String?                @db.VarChar(50)
+  rating            Decimal                @default(5.0) @db.Decimal(3, 2)
+  reviewsCount      Int                    @default(0) @map("reviews_count")
+  sortOrder         Int                    @default(0) @map("sort_order")
+  osemiUrl          String?                @map("osemi_url") @db.VarChar(1000)
+  createdAt         DateTime               @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  categories        ProductCategory[]
+  images            ProductImage[]
+  specifications    ProductSpecification[]
+  highlights        ProductHighlight[]
+  boxContents       ProductBoxContent[]
+  documents         ProductDocument[]
+  tutorials         Tutorial[]
+
+  @@index([isPublished])
+  @@index([series])
+  @@index([slug])
+  @@map("products")
+}
+
+model ProductCategory {
+  productId  String   @map("product_id") @db.VarChar(100)
+  categoryId Int      @map("category_id")
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productId, categoryId])
+  @@map("product_categories")
+}
+
+model ProductImage {
+  id        Int      @id @default(autoincrement())
+  productId String   @map("product_id") @db.VarChar(100)
+  imageUrl  String   @map("image_url") @db.VarChar(500)
+  altText   String?  @map("alt_text") @db.VarChar(255)
+  sortOrder Int      @default(0) @map("sort_order")
+  isMain    Boolean  @default(false) @map("is_main")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+model ProductSpecification {
+  id        Int     @id @default(autoincrement())
+  productId String  @map("product_id") @db.VarChar(100)
+  specKey   String  @map("spec_key") @db.VarChar(150)
+  specValue String  @map("spec_value") @db.Text
+  sortOrder Int     @default(0) @map("sort_order")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_specifications")
+}
+
+model ProductHighlight {
+  id            Int     @id @default(autoincrement())
+  productId     String  @map("product_id") @db.VarChar(100)
+  highlightText String  @map("highlight_text") @db.Text
+  sortOrder     Int     @default(0) @map("sort_order")
+  product       Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_highlights")
+}
+
+model ProductBoxContent {
+  id        Int     @id @default(autoincrement())
+  productId String  @map("product_id") @db.VarChar(100)
+  itemText  String  @map("item_text") @db.Text
+  sortOrder Int     @default(0) @map("sort_order")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_box_contents")
+}
+
+model Banner {
+  id        Int      @id @default(autoincrement())
+  title     String   @db.VarChar(255)
+  subtitle  String?  @db.Text
+  imageUrl  String?  @map("image_url") @db.VarChar(500)
+  ctaText   String?  @map("cta_text") @db.VarChar(100)
+  ctaLink   String?  @map("cta_link") @db.VarChar(500)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("banners")
+}
+
+model SiteSetting {
+  settingKey   String   @id @map("setting_key") @db.VarChar(100)
+  settingValue String   @map("setting_value") @db.Text
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("site_settings")
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int?     @map("user_id")
+  username   String?  @db.VarChar(100)
+  action     String   @db.VarChar(100)
+  entityType String   @map("entity_type") @db.VarChar(100)
+  entityId   String?  @map("entity_id") @db.VarChar(100)
+  details    String?  @db.Text
+  ipAddress  String?  @map("ip_address") @db.VarChar(50)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Inquiry {
+  id           String   @id @db.VarChar(100)
+  type         String   @default("contact") @db.VarChar(50)
+  name         String?  @db.VarChar(200)
+  email        String   @db.VarChar(255)
+  organization String?  @db.VarChar(200)
+  phone        String?  @db.VarChar(50)
+  subject      String?  @db.VarChar(300)
+  message      String?  @db.Text
+  details      String?  @db.Text
+  status       String   @default("new") @db.VarChar(50)
+  ipAddress    String?  @map("ip_address") @db.VarChar(50)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@map("inquiries")
+}
+
+model ProductDocument {
+  id               String   @id @db.VarChar(100)
+  productId        String   @map("product_id") @db.VarChar(100)
+  documentTitle    String   @map("document_title") @db.VarChar(255)
+  documentType     String   @default("tutorial") @map("document_type") @db.VarChar(50)
+  filePath         String   @default("") @map("file_path") @db.VarChar(500)
+  videoUrl         String?  @map("video_url") @db.VarChar(1000)
+  originalFilename String   @default("") @map("original_filename") @db.VarChar(255)
+  fileSize         Int      @default(0) @map("file_size")
+  mimeType         String   @default("application/pdf") @map("mime_type") @db.VarChar(100)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("product_documents")
+}
+
+model Tutorial {
+  id            String    @id @db.VarChar(100)
+  productId     String?   @map("product_id") @db.VarChar(100)
+  title         String    @db.VarChar(255)
+  lessonTag     String?   @default("Lesson 01 • 15 Mins") @map("lesson_tag") @db.VarChar(100)
+  description   String?   @db.Text
+  thumbnailUrl  String?   @map("thumbnail_url") @db.VarChar(500)
+  videoUrl      String?   @map("video_url") @db.VarChar(1000)
+  videoFilePath String?   @map("video_file_path") @db.VarChar(500)
+  pdfFilePath   String?   @map("pdf_file_path") @db.VarChar(500)
+  sortOrder     Int       @default(0) @map("sort_order")
+  isPublished   Boolean   @default(true) @map("is_published")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  product       Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([sortOrder])
+  @@index([isPublished])
+  @@map("tutorials")
+}
+
+
+model Page {
+  id              String        @id @db.VarChar(100)
+  slug            String        @unique @db.VarChar(150)
+  title           String        @db.VarChar(255)
+  metaTitle       String?       @map("meta_title") @db.VarChar(255)
+  metaDescription String?       @map("meta_description") @db.Text
+  isPublished     Boolean       @default(true) @map("is_published")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  sections        PageSection[]
+
+  @@index([slug])
+  @@index([isPublished])
+  @@map("pages")
+}
+
+model PageSection {
+  id          String   @id @db.VarChar(100)
+  pageId      String   @map("page_id") @db.VarChar(100)
+  sectionKey  String   @map("section_key") @db.VarChar(100)
+  sectionType String   @map("section_type") @db.VarChar(100)
+  tag         String?  @db.VarChar(100)
+  title       String?  @db.VarChar(255)
+  subtitle    String?  @db.Text
+  description String?  @db.Text
+  contentData String   @default("{}") @map("content_data") @db.Text
+  isVisible   Boolean  @default(true) @map("is_visible")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  page        Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, sectionKey])
+  @@index([pageId])
+  @@index([sortOrder])
+  @@index([isVisible])
+  @@map("page_sections")
+}
+
+model NavigationMenu {
+  id        String           @id @db.VarChar(100)
+  menuKey   String           @unique @map("menu_key") @db.VarChar(100)
+  title     String           @db.VarChar(150)
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  items     NavigationItem[]
+
+  @@map("navigation_menus")
+}
+
+model NavigationItem {
+  id         String           @id @db.VarChar(100)
+  menuId     String           @map("menu_id") @db.VarChar(100)
+  parentId   String?          @map("parent_id") @db.VarChar(100)
+  label      String           @db.VarChar(150)
+  url        String           @db.VarChar(500)
+  target     String?          @default("_self") @db.VarChar(50)
+  badge      String?          @db.VarChar(50)
+  sortOrder  Int              @default(0) @map("sort_order")
+  isVisible  Boolean          @default(true) @map("is_visible")
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  menu       NavigationMenu   @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  parent     NavigationItem?  @relation("NavHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children   NavigationItem[] @relation("NavHierarchy")
+
+  @@index([menuId])
+  @@index([parentId])
+  @@index([sortOrder])
+  @@map("navigation_items")
+}
+
+model SoftwareItem {
+  id                  String            @id @db.VarChar(100)
+  name                String            @db.VarChar(255)
+  slug                String            @unique @db.VarChar(150)
+  icon                String?           @db.VarChar(255)
+  iconBg              String?           @default("var(--oxy-primary-light)") @map("icon_bg") @db.VarChar(100)
+  iconColor           String?           @default("var(--oxy-primary)") @map("icon_color") @db.VarChar(100)
+  shortDesc           String?           @map("short_desc") @db.VarChar(255)
+  description         String?           @db.Text
+  supportedOs         String?           @default("[]") @map("supported_os") @db.Text
+  primaryBtnText      String?           @map("primary_btn_text") @db.VarChar(100)
+  primaryBtnAction    String?           @map("primary_btn_action") @db.VarChar(500)
+  secondaryBtnText    String?           @map("secondary_btn_text") @db.VarChar(100)
+  secondaryBtnAction  String?           @map("secondary_btn_action") @db.VarChar(500)
+  sortOrder           Int               @default(0) @map("sort_order")
+  isPublished         Boolean           @default(true) @map("is_published")
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  releases            SoftwareRelease[]
+
+  @@index([slug])
+  @@index([isPublished])
+  @@index([sortOrder])
+  @@map("software_items")
+}
+
+model SoftwareRelease {
+  id             String       @id @db.VarChar(100)
+  softwareId     String       @map("software_id") @db.VarChar(100)
+  version        String       @db.VarChar(50)
+  platform       String       @db.VarChar(50)
+  architecture   String?      @db.VarChar(50)
+  releaseNotes   String?      @map("release_notes") @db.Text
+  fileName       String?      @map("file_name") @db.VarChar(255)
+  filePath       String?      @map("file_path") @db.VarChar(500)
+  fileSize       BigInt       @default(0) @map("file_size")
+  fileType       String?      @map("file_type") @db.VarChar(50)
+  externalUrl    String?      @map("external_url") @db.VarChar(1000)
+  sha256Checksum String?      @map("sha256_checksum") @db.VarChar(100)
+  isLatest       Boolean      @default(true) @map("is_latest")
+  isPublished    Boolean      @default(true) @map("is_published")
+  downloadCount  Int          @default(0) @map("download_count")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  software       SoftwareItem @relation(fields: [softwareId], references: [id], onDelete: Cascade)
+
+  @@index([softwareId])
+  @@index([platform])
+  @@index([isLatest])
+  @@index([isPublished])
+  @@map("software_releases")
+}
+
+model MediaAsset {
+  id           String   @id @db.VarChar(100)
+  fileName     String   @map("file_name") @db.VarChar(255)
+  originalName String   @map("original_name") @db.VarChar(255)
+  filePath     String   @map("file_path") @db.VarChar(500)
+  fileSize     BigInt   @default(0) @map("file_size")
+  mimeType     String?  @map("mime_type") @db.VarChar(100)
+  assetType    String?  @default("image") @map("asset_type") @db.VarChar(50)
+  altText      String?  @map("alt_text") @db.VarChar(255)
+  dimensions   String?  @db.VarChar(50)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([assetType])
+  @@index([createdAt])
+  @@map("media_assets")
+}
+
+model FaqItem {
+  id          String   @id @db.VarChar(100)
+  category    String?  @default("General") @db.VarChar(100)
+  question    String   @db.VarChar(500)
+  answer      String   @db.Text
+  sortOrder   Int      @default(0) @map("sort_order")
+  isPublished Boolean  @default(true) @map("is_published")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([isPublished])
+  @@map("faq_items")
+}

@@ -1,26 +1,23 @@
 {
-  "name": "nikhil",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "oxybott-platform",
+  "version": "2.0.0",
+  "description": "Oxybott STEM Robotics Platform - React + Node.js Full-Stack Application",
+  "main": "project/backend/src/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node project/backend/src/server.js",
+    "build": "npm run build --prefix project/frontend",
+    "dev": "npm run dev --prefix project/frontend",
+    "server": "node project/backend/src/server.js",
+    "install:all": "npm install --prefix project/backend && npm install --prefix project/frontend"
   },
-  "keywords": [],
-  "type": "commonjs",
-  "dependencies": {
-    "bcryptjs": "^3.0.3",
-    "cookie-parser": "^1.4.7",
-    "cors": "^2.8.6",
-    "dotenv": "^18.0.9",
-    "express": "^5.3.0",
-    "express-rate-limit": "^8.7.1",
-    "jsonwebtoken": "^9.0.3",
-    "multer": "^2.5.0"
-  },
-  "devDependencies": {
-    "@axe-core/playwright": "^4.14.0",
-    "@playwright/test": "^1.64.1",
-    "sharp": "^0.35.5"
-  }
+  "keywords": [
+    "oxybott",
+    "stem",
+    "robotics",
+    "cms",
+    "react",
+    "express"
+  ],
+  "author": "Oxybott Team",
+  "license": "ISC"
 }

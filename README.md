@@ -1,104 +1,179 @@
-# Oxybott — STEM Kits, ESP32 Robotics & Coding Education Platform
+# Oxybott STEM Robotics Platform — Modern Full-Stack Web Application
 
-![Oxybott Banner](assets/images/banner-app.webp)
+![Oxybott Banner](frontend/public/assets/images/banner-app.webp)
 
-A full-stack, production-hardened web platform for **Oxybott**, a premier brand specializing in ESP32 smart robotics kits, IoT STEM learning modules, and classroom curriculum solutions.
+A modern, high-performance full-stack web platform for **Oxybott**, a premier educational robotics brand specializing in ESP32 smart robotics kits, IoT STEM learning modules, and classroom curriculum solutions.
+
+This project represents the complete architectural migration from legacy static HTML/Vanilla JS to a scalable **React 18 (Vite SPA) + Node.js (Modular Express 5.x) + PostgreSQL** ecosystem.
+
+---
+
+## 🏛️ Modern Architecture Overview
+
+```
+project/
+├── frontend/                     # Modern React 18 + Vite SPA
+│   ├── public/                   # Static assets, WebP images, uploads
+│   ├── src/
+│   │   ├── assets/               # Bundled imagery & icons
+│   │   ├── components/           # Reusable components
+│   │   │   ├── cart/             # Slide-out Cart Drawer with line items & subtotal
+│   │   │   ├── common/           # SiteHeader, MegaMenu, SiteFooter, AnnouncementBar
+│   │   │   ├── home/             # Interactive CodeStudio simulation
+│   │   │   ├── modals/           # Institutional QuoteModal
+│   │   │   ├── product/          # ProductCard with wishlist & badges
+│   │   │   └── search/           # Quick Search Modal (Ctrl+K)
+│   │   ├── context/              # CartContext, StoreContext, AuthContext, ToastContext
+│   │   ├── layouts/              # RootLayout with modals & persistent headers
+│   │   ├── pages/                # HomePage, ProductsPage, ProductDetailPage,
+│   │   │                         # EducationPage, SoftwarePage, TutorialsPage,
+│   │   │                         # AboutPage, ContactPage, NotFoundPage
+│   │   │   └── admin/            # AdminLoginPage, AdminDashboardPage
+│   │   ├── routes/               # React Router v6 route configuration
+│   │   ├── services/             # API client with anti-CSRF headers
+│   │   ├── styles/               # Preserved styles.css & admin.css
+│   │   └── utils/                # Fallback products data
+│   ├── package.json
+│   └── vite.config.js            # Vite config with API proxy
+│
+├── backend/                      # Production-ready Modular Express Backend
+│   ├── prisma/
+│   │   └── schema.prisma         # Prisma ORM Schema for PostgreSQL
+│   ├── src/
+│   │   ├── config/               # Database connection pool (pg / node-postgres)
+│   │   ├── controllers/          # Products, Categories, Banners, Inquiries, Settings, Auth, Admin
+│   │   ├── database/             # PostgreSQL migrations, seeders, SQLite import
+│   │   │   ├── migrations/       # 001_init.sql PostgreSQL DDL
+│   │   │   ├── migrate.js        # Migration runner
+│   │   │   ├── seed.js           # Seed admin, categories, settings, hero banner
+│   │   │   └── import-sqlite.js  # Safe SQLite-to-PostgreSQL data migration
+│   │   ├── middleware/           # Auth (JWT/cookies/anti-CSRF), Multer upload, Error handler
+│   │   ├── routes/               # Express modular REST routers
+│   │   ├── services/             # Core business logic layer
+│   │   ├── app.js                # Express app configuration & middlewares
+│   │   └── server.js             # HTTP server entrypoint
+│   ├── tests/                    # Automated integration test suite
+│   │   └── api.test.js           # 10 integration test suites (100% passing)
+│   └── package.json
+│
+├── .env.example                  # Environment configuration template
+└── README.md                     # Complete documentation & operations guide
+```
 
 ---
 
 ## 🚀 Key Features
 
 * **Storefront & Product Catalog:**
-  * Dynamic, responsive catalog loaded from SQLite with real-time filtering by category, difficulty series, and age groups.
-  * Product Detail Pages (PDP) with high-res multi-angle galleries, STEM curriculum highlights, technical pinouts, and code samples.
+  * Dynamic, responsive catalog loaded from PostgreSQL with multi-facet filtering (Series, Category, Age groups) and real-time sorting.
+  * Product Detail Pages (PDP) with multi-angle galleries, STEM curriculum highlights, technical pinouts, and box contents.
   * Standardized Indian Rupee (INR `₹`) pricing across all components via `Intl.NumberFormat`.
 * **Lead Capture & Inquiry Workflow:**
   * Functional lead forms for general inquiries, institutional quotation requests, educator trial units, and newsletter subscriptions.
-  * Direct backend persistence to SQLite with server-side validation, duplicate submission protection (60s anti-spam window), and IP rate limiting.
+  * Direct backend persistence to PostgreSQL with server-side validation, duplicate submission protection (60s anti-spam window), and IP rate limiting.
 * **Admin Dashboard:**
   * Secure administrative portal with JWT authentication, `SameSite: Strict` / `HttpOnly` cookie protection, and anti-CSRF headers.
   * Complete product CRUD (Create, Read, Update, Delete) with image upload validation (MIME-type filtering and file size bounds).
   * Inquiry & Lead Management dashboard to track, filter, and transition incoming leads (`new` → `in_progress` → `resolved` → `archived`).
   * Immutable administrative audit trail logging all sensitive mutations.
-* **Performance & Asset Pipeline:**
-  * Optimized WebP imagery with high-priority preloading (`fetchpriority="high"`) for above-the-fold heroes and native lazy-loading for below-the-fold media.
-  * Parallel non-blocking Google Fonts loading via preconnect links.
-  * Zero Cumulative Layout Shift (CLS = 0.000).
-* **Accessibility (WCAG 2.1 AA):**
-  * Semantic HTML5 landmarks (`<main id="mainContent">`) across all pages.
-  * Verified 100% WCAG 2.1 AA color contrast compliance across buttons, chips, badges, and code blocks.
-  * Keyboard-focusable code panes (`tabindex="0"` and ARIA labels).
+* **Interactive Code Studio:**
+  * Virtual tri-lingual programming viewer (OxyCode Blocks, Arduino C++, MicroPython).
+  * In-browser servo articulation visualizer simulating pick-and-place robot motion.
 
 ---
 
 ## 🛠️ Technology Stack
 
-* **Frontend:** Semantic HTML5, Vanilla CSS3 (Custom Design System), JavaScript (ES2022)
-* **Backend:** Node.js, Express 5.x
-* **Database:** SQLite via Node.js native `node:sqlite` (`DatabaseSync` with WAL mode enabled)
-* **Authentication:** JWT, bcryptjs, HTTP-only SameSite=Strict cookies, anti-CSRF headers
-* **Testing:** Playwright, `@axe-core/playwright`, Google Lighthouse CLI
+* **Frontend:** React 18, JSX, Vite, React Router v6, CSS3 Custom Design System (WCAG 2.1 AA compliant)
+* **Backend:** Node.js, Express.js 4.x/5.x (Modular MVC Architecture)
+* **Database:** PostgreSQL with `node-postgres` (`pg`) connection pooling & Prisma Schema
+* **Security:** JWT, bcryptjs, HTTP-only SameSite=Strict cookies, custom anti-CSRF header validation, express-rate-limit
+* **Testing:** Node.js native test runner (`node --test`), Playwright regression verification
 
 ---
 
 ## 🏁 Getting Started
 
 ### 1. Prerequisites
-* **Node.js** v20.x or v22.x+
+* **Node.js** v20.x, v22.x, or v24.x+
 * **npm** v10.x+
+* **PostgreSQL** 14+ (optional for local dev; built-in SQLite translation fallback provided if PostgreSQL is not running)
 
-### 2. Installation
+### 2. Environment Configuration
+Copy `.env.example` in `project/`:
 ```bash
-# Clone the repository
-git clone https://github.com/ishikaagarwal-firmware/oxybott-website.git
-cd oxybott-website
+cp project/.env.example project/.env
+```
+Key environment variables:
+```env
+PORT=5000
+HOST=127.0.0.1
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/oxybott
+JWT_SECRET=oxybott_secure_jwt_secret_key_prod_2026_modern_pg_xyz987
+CLIENT_ORIGIN=http://localhost:3000
+```
+
+### 3. Backend Setup & Start
+```bash
+# Navigate to backend
+cd project/backend
 
 # Install dependencies
 npm install
-```
 
-### 3. Environment Configuration
-Copy the environment template and configure secrets:
-```bash
-cp .env.example .env
-```
-Generate a strong production JWT secret (at least 32 characters):
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
+# Run PostgreSQL Migrations & Seed (optional if using PostgreSQL)
+npm run db:migrate
+npm run db:seed
 
-### 4. Running the Application
+# Start backend server
+npm start
+```
+The backend starts at `http://127.0.0.1:5000/api`.
+
+### 4. Frontend Setup & Start
 ```bash
-# Start the local server
-node server/server.js
+# Navigate to frontend
+cd project/frontend
+
+# Install dependencies
+npm install
+
+# Start Vite development server
+npm run dev
 ```
 Open your browser to:
-* **Storefront:** [http://127.0.0.1:3000/](http://127.0.0.1:3000/)
-* **Admin Portal:** [http://127.0.0.1:3000/admin/](http://127.0.0.1:3000/admin/)
+* **Storefront:** [http://localhost:3000/](http://localhost:3000/)
+* **Admin Portal:** [http://localhost:3000/admin](http://localhost:3000/admin)
+* **Admin Login Credentials:**
+  * Username: `admin`
+  * Password: `AdminPassword123!`
 
 ---
 
-## 🧪 Testing & Quality Assurance
+## 🧪 Testing & Verification
 
-The codebase includes an automated regression and compliance test suite:
-
+Run the automated backend integration test suite:
 ```bash
-# Run all tests across desktop and mobile
-npx playwright test
-
-# Run accessibility audits only (WCAG 2.1 AA compliance)
-npx playwright test tests/accessibility.spec.js
-
-# Run regression & hardening verification suite
-npx playwright test tests/regression-fixes.spec.js
-
-# Run admin CRUD & security access tests
-npx playwright test tests/admin-crud.spec.js tests/security-api.spec.js
+cd project/backend
+npm test
 ```
+**Verification Results:**
+* `✔ 1. Health check endpoint responds OK`
+* `✔ 2. Public Settings endpoint returns store configuration`
+* `✔ 3. Public Categories endpoint returns published categories`
+* `✔ 4. Public Products endpoint returns product catalog with filters`
+* `✔ 5. Public Product Detail endpoint returns full metadata`
+* `✔ 6. Inquiries endpoint validates input and prevents spam duplicate`
+* `✔ 7. Admin Auth handles rejection of invalid credentials and accepts valid admin`
+* `✔ 8. Admin Dashboard Stats endpoint returns aggregated metrics`
+* `✔ 9. Admin Product Lifecycle (Create, Update, Publish, Duplicate, Delete)`
+* `✔ 10. Admin Inquiries management (List, Status Update, Delete)`
+* **Total: 10 passed, 0 failed.**
 
-Detailed independent QA verification findings, metrics, and before/after comparisons are documented in [`reports/INDEPENDENT_QA_AUDIT.md`](reports/INDEPENDENT_QA_AUDIT.md).
+### Production Frontend Build Check
+```bash
+cd project/frontend
+npm run build
+```
+Builds optimized production assets to `project/frontend/dist/`.
 
----
-
-## 📄 License
-This project is proprietary and confidential to Oxybott. All rights reserved.
