@@ -8,7 +8,7 @@ export default function AdminLoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const [username, setUsername] = useState('admin');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -94,11 +94,6 @@ export default function AdminLoginPage() {
             {!loading && <IconArrowRight size={15} />}
           </button>
         </form>
-
-        <div style={{ marginTop: '1.5rem', padding: '0.75rem', background: '#f1f5f9', borderRadius: '8px', fontSize: '0.8rem', color: '#475569' }}>
-          <strong>Initial Admin Credentials:</strong><br />
-          Username: <code style={{ color: 'var(--admin-navy)', fontWeight: 700 }}>admin</code> &bull; Password: <code style={{ color: 'var(--admin-navy)', fontWeight: 700 }}>AdminPassword123!</code>
-        </div>
       </div>
     </div>
   );

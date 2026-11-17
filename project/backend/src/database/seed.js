@@ -33,12 +33,12 @@ async function seedDatabase() {
     // 1. Admin User
     const adminRes = await client.query('SELECT id FROM admin_users WHERE username = $1', ['admin']);
     if (adminRes.rowCount === 0) {
-      const hash = await bcrypt.hash('AdminPassword123!', 10);
+      const hash = await bcrypt.hash('oxymora@2025', 10);
       await client.query(`
         INSERT INTO admin_users (username, email, password_hash, role)
         VALUES ($1, $2, $3, $4)
       `, ['admin', 'admin@oxybott.com', hash, 'admin']);
-      console.log('✅ Created default admin account: admin / AdminPassword123!');
+      console.log('✅ Created default admin account: admin / oxymora@2025');
     } else {
       console.log('ℹ️ Admin user already exists.');
     }

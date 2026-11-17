@@ -133,7 +133,7 @@ test('7. Admin Auth handles rejection of invalid credentials and accepts valid a
   // Valid login
   const goodLogin = await request('/api/admin/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ username: 'admin', password: 'AdminPassword123!' })
+    body: JSON.stringify({ username: 'admin', password: 'oxymora@2025' })
   });
   assert.equal(goodLogin.status, 200);
   assert.equal(goodLogin.data.success, true);
