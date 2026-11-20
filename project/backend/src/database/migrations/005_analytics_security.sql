@@ -22,13 +22,40 @@ CREATE TABLE IF NOT EXISTS visitor_sessions (
   last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   page_count INTEGER DEFAULT 1,
   duration_seconds INTEGER DEFAULT 0,
+  active_seconds INTEGER DEFAULT 0,
+  is_engaged BOOLEAN DEFAULT FALSE,
+  is_bot BOOLEAN DEFAULT FALSE,
+  channel VARCHAR(50) DEFAULT 'Direct',
+  country VARCHAR(100) DEFAULT '',
+  city VARCHAR(100) DEFAULT '',
   is_new_visitor BOOLEAN DEFAULT TRUE,
-  is_admin_test BOOLEAN DEFAULT FALSE
+  is_admin_test BOOLEAN DEFAULT FALSE,
+  is_test BOOLEAN DEFAULT FALSE
 );
 
 CREATE INDEX IF NOT EXISTS idx_vs_anonymous_id ON visitor_sessions(anonymous_id);
 CREATE INDEX IF NOT EXISTS idx_vs_session_start ON visitor_sessions(session_start);
 CREATE INDEX IF NOT EXISTS idx_vs_last_seen ON visitor_sessions(last_seen);
+CREATE INDEX IF NOT EXISTS idx_vs_is_engaged ON visitor_sessions(is_engaged);
+CREATE INDEX IF NOT EXISTS idx_vs_channel ON visitor_sessions(channel);
+
+-- Excluded IPs & Bot Hits
+CREATE TABLE IF NOT EXISTS excluded_ips (
+  id VARCHAR(100) PRIMARY KEY,
+  ip_pattern VARCHAR(100) NOT NULL,
+  note TEXT DEFAULT '',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS bot_hits (
+  id VARCHAR(100) PRIMARY KEY,
+  user_agent TEXT,
+  ip_masked VARCHAR(100),
+  reason VARCHAR(100),
+  page_path TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_bh_created ON bot_hits(created_at);
 
 -- 2. Page Views
 CREATE TABLE IF NOT EXISTS page_views (

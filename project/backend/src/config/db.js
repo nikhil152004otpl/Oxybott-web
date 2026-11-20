@@ -284,13 +284,63 @@ function getSqliteFallback() {
         last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
         page_count INTEGER DEFAULT 1,
         duration_seconds INTEGER DEFAULT 0,
+        active_seconds INTEGER DEFAULT 0,
+        is_engaged INTEGER DEFAULT 0,
+        is_bot INTEGER DEFAULT 0,
+        channel TEXT DEFAULT 'Direct',
+        country TEXT DEFAULT '',
+        city TEXT DEFAULT '',
         is_new_visitor INTEGER DEFAULT 1,
-        is_admin_test INTEGER DEFAULT 0
+        is_admin_test INTEGER DEFAULT 0,
+        is_test INTEGER DEFAULT 0
       );
+    `);
 
+    // Ensure all new analytics columns exist on visitor_sessions for backwards-compatible migration BEFORE creating indexes
+    try {
+      const sessionCols = sqliteDb.prepare("PRAGMA table_info(visitor_sessions)").all().map(c => c.name);
+      const requiredCols = [
+        { name: 'active_seconds', type: 'INTEGER DEFAULT 0' },
+        { name: 'is_engaged', type: 'INTEGER DEFAULT 0' },
+        { name: 'is_bot', type: 'INTEGER DEFAULT 0' },
+        { name: 'channel', type: "TEXT DEFAULT 'Direct'" },
+        { name: 'country', type: "TEXT DEFAULT ''" },
+        { name: 'city', type: "TEXT DEFAULT ''" },
+        { name: 'is_admin_test', type: 'INTEGER DEFAULT 0' },
+        { name: 'is_test', type: 'INTEGER DEFAULT 0' }
+      ];
+      for (const col of requiredCols) {
+        if (!sessionCols.includes(col.name)) {
+          try {
+            sqliteDb.exec(`ALTER TABLE visitor_sessions ADD COLUMN ${col.name} ${col.type}`);
+          } catch {}
+        }
+      }
+    } catch {}
+
+    sqliteDb.exec(`
       CREATE INDEX IF NOT EXISTS idx_vs_anonymous_id ON visitor_sessions(anonymous_id);
       CREATE INDEX IF NOT EXISTS idx_vs_session_start ON visitor_sessions(session_start);
       CREATE INDEX IF NOT EXISTS idx_vs_last_seen ON visitor_sessions(last_seen);
+      CREATE INDEX IF NOT EXISTS idx_vs_is_engaged ON visitor_sessions(is_engaged);
+      CREATE INDEX IF NOT EXISTS idx_vs_channel ON visitor_sessions(channel);
+
+      CREATE TABLE IF NOT EXISTS excluded_ips (
+        id TEXT PRIMARY KEY,
+        ip_pattern TEXT NOT NULL,
+        note TEXT DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS bot_hits (
+        id TEXT PRIMARY KEY,
+        user_agent TEXT,
+        ip_masked TEXT,
+        reason TEXT,
+        page_path TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_bh_created ON bot_hits(created_at);
 
       CREATE TABLE IF NOT EXISTS page_views (
         id TEXT PRIMARY KEY,
