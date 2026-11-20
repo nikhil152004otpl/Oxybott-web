@@ -281,13 +281,16 @@ function getSqliteFallback() {
         landing_page TEXT,
         session_start DATETIME DEFAULT CURRENT_TIMESTAMP,
         session_end DATETIME,
+        last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
         page_count INTEGER DEFAULT 1,
         duration_seconds INTEGER DEFAULT 0,
-        is_new_visitor INTEGER DEFAULT 1
+        is_new_visitor INTEGER DEFAULT 1,
+        is_admin_test INTEGER DEFAULT 0
       );
 
       CREATE INDEX IF NOT EXISTS idx_vs_anonymous_id ON visitor_sessions(anonymous_id);
       CREATE INDEX IF NOT EXISTS idx_vs_session_start ON visitor_sessions(session_start);
+      CREATE INDEX IF NOT EXISTS idx_vs_last_seen ON visitor_sessions(last_seen);
 
       CREATE TABLE IF NOT EXISTS page_views (
         id TEXT PRIMARY KEY,
@@ -423,9 +426,15 @@ function translatePgToSqlite(sql, params) {
   translatedSql = translatedSql.replace(/\bTRUE\b/g, '1').replace(/\bFALSE\b/g, '0');
   translatedSql = translatedSql.replace(/\(NOW\(\)\s*-\s*INTERVAL\s*'(\d+)\s*seconds'\)/gi, "datetime('now', '-$1 seconds')");
   translatedSql = translatedSql.replace(/NOW\(\)/gi, 'CURRENT_TIMESTAMP');
-  translatedSql = translatedSql.replace(/\$(\d+)/g, '?');
+  // Map $1, $2, etc. to SQLite ? placeholders and map params correctly by referenced index
+  const newParams = [];
+  translatedSql = translatedSql.replace(/\$(\d+)/g, (_, match) => {
+    const idx = parseInt(match, 10) - 1;
+    newParams.push(params[idx]);
+    return '?';
+  });
 
-  const translatedParams = params.map(p => {
+  const translatedParams = newParams.map(p => {
     if (p === undefined) return null;
     if (typeof p === 'boolean') return p ? 1 : 0;
     return p;

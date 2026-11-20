@@ -48,9 +48,25 @@ function isNewSession() {
 }
 
 // ─── Admin exclusion ──────────────────────────────────────────────────────────
-function isAdminUser() {
+function isAdminPath() {
   try {
-    return Boolean(localStorage.getItem('oxybott_admin_token')) || window.location.pathname.startsWith('/admin');
+    return window.location.pathname.startsWith('/admin');
+  } catch {
+    return false;
+  }
+}
+
+function isExplicitAdminExcluded() {
+  try {
+    return localStorage.getItem('oxybott_exclude_admin') === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function isAdminTest() {
+  try {
+    return Boolean(localStorage.getItem('oxybott_admin_token'));
   } catch {
     return false;
   }
@@ -58,13 +74,62 @@ function isAdminUser() {
 
 // ─── Consent check ───────────────────────────────────────────────────────────
 function hasAnalyticsConsent() {
-  if (isAdminUser()) return false; // Exclude internal admin visits from public analytics
+  // Exclude admin panel pages from storefront visitor analytics
+  if (isAdminPath()) return false;
+  // Exclude if explicitly configured to opt out
+  if (isExplicitAdminExcluded()) return false;
+
   try {
     const prefs = localStorage.getItem('_oxconsent');
-    if (!prefs) return false;
+    if (!prefs) return true; // Privacy-friendly first-party tracking active by default
     const parsed = JSON.parse(prefs);
-    return parsed?.analytics === true;
-  } catch { return false; }
+    if (parsed.decided && parsed.analytics === false) return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+// ─── Heartbeat Mechanism (25-second pulse for real-time presence) ────────────
+let heartbeatInterval = null;
+
+function sendHeartbeat() {
+  if (!hasAnalyticsConsent()) return;
+  const visitorId = getVisitorId();
+  const sessionId = getSessionId();
+
+  const payload = {
+    visitorId,
+    sessionId,
+    pagePath: window.location.pathname,
+    pageTitle: document.title,
+    isAdminTest: isAdminTest()
+  };
+
+  fetch(`${API_BASE}/analytics/heartbeat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    keepalive: true
+  }).catch(() => {});
+}
+
+function startHeartbeat() {
+  if (heartbeatInterval) return;
+  sendHeartbeat();
+  heartbeatInterval = setInterval(() => {
+    if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+      sendHeartbeat();
+    }
+  }, 25000);
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        sendHeartbeat();
+      }
+    });
+  }
 }
 
 // ─── UTM params ──────────────────────────────────────────────────────────────
@@ -83,6 +148,9 @@ let pageEntryTime = Date.now();
 
 async function trackPageView(path, title) {
   if (!hasAnalyticsConsent()) return;
+
+  // Ensure heartbeat pulse is active
+  startHeartbeat();
 
   const visitorId = getVisitorId();
   const sessionId = getSessionId();
@@ -107,7 +175,8 @@ async function trackPageView(path, title) {
     isNewSession: newSession,
     timeOnPrevPage,
     prevPagePath,
-    consentGiven: true
+    consentGiven: true,
+    isAdminTest: isAdminTest()
   };
 
   try {
@@ -136,7 +205,8 @@ async function trackEvent(eventType, entityType = '', entityId = '', entityTitle
     entityTitle,
     metadata,
     pagePath: window.location.pathname + window.location.search,
-    consentGiven: true
+    consentGiven: true,
+    isAdminTest: isAdminTest()
   };
 
   try {
@@ -166,7 +236,8 @@ function trackSearch(queryText, resultCount = 0, clickedEntityId = '') {
       resultCount: parseInt(resultCount) || 0,
       clickedEntityId,
       pagePath: window.location.pathname,
-      consentGiven: true
+      consentGiven: true,
+      isAdminTest: isAdminTest()
     };
 
     try {
@@ -199,5 +270,5 @@ export async function syncConsent(preferences) {
 }
 
 // ─── Public exports ───────────────────────────────────────────────────────────
-export { trackPageView, trackEvent, trackSearch, getVisitorId };
-export default { trackPageView, trackEvent, trackSearch, syncConsent, getVisitorId };
+export { trackPageView, trackEvent, trackSearch, startHeartbeat, getVisitorId };
+export default { trackPageView, trackEvent, trackSearch, startHeartbeat, syncConsent, getVisitorId };

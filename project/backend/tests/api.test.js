@@ -841,3 +841,77 @@ test('20. Advanced Visitor Intelligence (Interactions, External Clicks, Video & 
   assert.equal(reportCsvRes.status, 200);
   assert.ok(reportCsvRes.headers.get('content-type').includes('text/csv'));
 });
+
+test('21. Visitor Heartbeat mechanism and Real-Time Active Visitors tracking', async () => {
+  const visitorId = 'v-heartbeat-test-01';
+  const sessionId = 's-heartbeat-test-01';
+
+  // Send heartbeat
+  const hbRes = await fetch(`${baseUrl}/api/analytics/heartbeat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      visitorId,
+      sessionId,
+      pagePath: '/products/qd022',
+      pageTitle: 'Oxybott QD022 Bipedal Robot'
+    })
+  });
+  const hbData = await hbRes.json();
+  assert.equal(hbRes.status, 200);
+  assert.equal(hbData.success, true);
+
+  // Check that real-time active visitors includes this visitor
+  const rtRes = await fetch(`${baseUrl}/api/analytics/realtime`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const rtData = await rtRes.json();
+  assert.equal(rtRes.status, 200);
+  assert.equal(rtData.success, true);
+  assert.ok(Array.isArray(rtData.activeVisitors));
+  const activeSession = rtData.activeVisitors.find(s => s.id === sessionId);
+  assert.ok(activeSession, 'Active session should appear in real-time visitors within 2 minutes');
+
+  // Check overview realTimeActive count >= 1
+  const ovRes = await fetch(`${baseUrl}/api/analytics/overview?range=today`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const ovData = await ovRes.json();
+  assert.equal(ovRes.status, 200);
+  assert.equal(ovData.success, true);
+  assert.ok(ovData.overview.realTimeActive >= 1);
+});
+
+test('22. IST Date range filtering strictly separates Today and Yesterday boundaries', async () => {
+  const todayRes = await fetch(`${baseUrl}/api/analytics/overview?range=today`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const todayData = await todayRes.json();
+  assert.equal(todayRes.status, 200);
+  assert.equal(todayData.success, true);
+  assert.ok(todayData.overview.period);
+  assert.ok(todayData.overview.period.since);
+  assert.ok(todayData.overview.period.until);
+
+  const yestRes = await fetch(`${baseUrl}/api/analytics/overview?range=yesterday`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const yestData = await yestRes.json();
+  assert.equal(yestRes.status, 200);
+  assert.equal(yestData.success, true);
+  assert.ok(yestData.overview.period);
+
+  // Validate non-overlapping boundaries: yesterday until is <= today since
+  const todaySince = new Date(todayData.overview.period.since).getTime();
+  const yestUntil = new Date(yestData.overview.period.until).getTime();
+  assert.ok(yestUntil <= todaySince, 'Yesterday period end boundary must precede Today period start boundary');
+
+  // Test chart endpoint with range=today
+  const chartTodayRes = await fetch(`${baseUrl}/api/analytics/chart?range=today`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const chartTodayData = await chartTodayRes.json();
+  assert.equal(chartTodayRes.status, 200);
+  assert.equal(chartTodayData.success, true);
+  assert.ok(Array.isArray(chartTodayData.chart.sessions));
+});

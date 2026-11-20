@@ -19,13 +19,16 @@ CREATE TABLE IF NOT EXISTS visitor_sessions (
   landing_page TEXT,
   session_start TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   session_end TIMESTAMP WITH TIME ZONE,
+  last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   page_count INTEGER DEFAULT 1,
   duration_seconds INTEGER DEFAULT 0,
-  is_new_visitor BOOLEAN DEFAULT TRUE
+  is_new_visitor BOOLEAN DEFAULT TRUE,
+  is_admin_test BOOLEAN DEFAULT FALSE
 );
 
 CREATE INDEX IF NOT EXISTS idx_vs_anonymous_id ON visitor_sessions(anonymous_id);
 CREATE INDEX IF NOT EXISTS idx_vs_session_start ON visitor_sessions(session_start);
+CREATE INDEX IF NOT EXISTS idx_vs_last_seen ON visitor_sessions(last_seen);
 
 -- 2. Page Views
 CREATE TABLE IF NOT EXISTS page_views (

@@ -8,36 +8,117 @@ const { query } = require('../config/db');
 const { UAParser } = require('ua-parser-js');
 const { randomUUID } = require('crypto');
 
-// Helper to parse date ranges (today, yesterday, 7, 30, 90, custom)
-function parseDateRange(queryObj) {
-  const now = new Date();
-  let since = new Date(now.getTime() - 30 * 86400000).toISOString();
-  let until = now.toISOString();
+// Asia/Kolkata reporting timezone helper (IST = UTC + 5:30)
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
-  const r = (queryObj.range || '').toString().toLowerCase();
+function getISTDateRange(queryObj) {
+  const r = (typeof queryObj === 'string' ? queryObj : (queryObj?.range || '')).toString().toLowerCase();
+  const startDate = typeof queryObj === 'object' ? queryObj?.startDate : null;
+  const endDate = typeof queryObj === 'object' ? queryObj?.endDate : null;
+
+  const nowUtc = new Date();
+  const nowIst = new Date(nowUtc.getTime() + IST_OFFSET_MS);
+
+  const istYear = nowIst.getUTCFullYear();
+  const istMonth = nowIst.getUTCMonth();
+  const istDate = nowIst.getUTCDate();
+
+  const istMidnightToUtc = (y, m, d) => new Date(Date.UTC(y, m, d, 0, 0, 0) - IST_OFFSET_MS);
+  const istEndOfDayToUtc = (y, m, d) => new Date(Date.UTC(y, m, d, 23, 59, 59, 999) - IST_OFFSET_MS);
+
+  let since;
+  let until = nowUtc.toISOString();
 
   if (r === 'today') {
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    since = startOfToday.toISOString();
+    since = istMidnightToUtc(istYear, istMonth, istDate).toISOString();
+    until = nowUtc.toISOString();
   } else if (r === 'yesterday') {
-    const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-    const endOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, -1);
-    since = startOfYesterday.toISOString();
-    until = endOfYesterday.toISOString();
-  } else if (queryObj.startDate) {
-    since = new Date(queryObj.startDate).toISOString();
-    if (queryObj.endDate) {
-      const endD = new Date(queryObj.endDate);
-      endD.setHours(23, 59, 59, 999);
-      until = endD.toISOString();
+    since = istMidnightToUtc(istYear, istMonth, istDate - 1).toISOString();
+    until = istEndOfDayToUtc(istYear, istMonth, istDate - 1).toISOString();
+  } else if (startDate) {
+    const [sY, sM, sD] = startDate.split('-').map(Number);
+    since = istMidnightToUtc(sY, sM - 1, sD).toISOString();
+    if (endDate) {
+      const [eY, eM, eD] = endDate.split('-').map(Number);
+      until = istEndOfDayToUtc(eY, eM - 1, eD).toISOString();
+    } else {
+      until = istEndOfDayToUtc(sY, sM - 1, sD).toISOString();
     }
   } else {
-    const days = parseInt(r) || 30;
-    since = new Date(now.getTime() - days * 86400000).toISOString();
+    const days = parseInt(r, 10) || 30;
+    since = istMidnightToUtc(istYear, istMonth, istDate - days + 1).toISOString();
+    until = nowUtc.toISOString();
   }
 
   return { since, until };
 }
+
+const parseDateRange = getISTDateRange;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC: Visitor presence & heartbeat mechanism (20-30s pulse, 2-min threshold)
+// POST /api/analytics/heartbeat
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/heartbeat', async (req, res) => {
+  try {
+    const {
+      visitorId,
+      sessionId,
+      pagePath,
+      pageTitle,
+      isAdminTest
+    } = req.body;
+
+    if (!visitorId || !sessionId) {
+      return res.json({ success: true, message: 'Missing visitor or session id' });
+    }
+
+    const now = new Date().toISOString();
+    const adminTestVal = isAdminTest ? 1 : 0;
+
+    const sess = await query('SELECT id, session_start FROM visitor_sessions WHERE id = $1', [sessionId]);
+
+    if (sess.rows.length > 0) {
+      await query(`
+        UPDATE visitor_sessions
+        SET last_seen = $1,
+            session_end = $1,
+            duration_seconds = MAX(duration_seconds, CAST((julianday($1) - julianday(session_start)) * 86400 AS INTEGER))
+        WHERE id = $2
+      `, [now, sessionId]);
+    } else {
+      const ip = (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+      const ua = req.headers['user-agent'] || '';
+      const parser = new UAParser(ua);
+      const browser = parser.getBrowser().name || 'Unknown';
+      const os = parser.getOS().name || 'Unknown';
+      const deviceType = parser.getDevice().type || 'desktop';
+
+      await query(`
+        INSERT INTO visitor_sessions 
+          (id, anonymous_id, ip_address, device_type, browser, os,
+           landing_page, session_start, session_end, last_seen,
+           page_count, duration_seconds, is_new_visitor, is_admin_test)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, 0, 1, $11)
+        ON CONFLICT (id) DO UPDATE SET
+          last_seen = excluded.last_seen,
+          session_end = excluded.session_end
+      `, [sessionId, visitorId, ip, deviceType, browser, os, pagePath || '/', now, now, now, adminTestVal]);
+
+      if (pagePath) {
+        await query(`
+          INSERT INTO page_views (id, session_id, page_path, page_title, viewed_at)
+          VALUES ($1, $2, $3, $4, $5)
+        `, [randomUUID(), sessionId, pagePath, pageTitle || '', now]).catch(() => {});
+      }
+    }
+
+    res.json({ success: true, timestamp: now });
+  } catch (err) {
+    console.error('[Analytics Heartbeat Error]', err.message);
+    res.json({ success: true });
+  }
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PUBLIC: Track custom interaction events (buy_now_click, video_*, download, etc.)
@@ -79,7 +160,8 @@ router.post('/event', async (req, res) => {
     await query(`
       UPDATE visitor_sessions
       SET session_end = $1,
-          duration_seconds = CAST((julianday($1) - julianday(session_start)) * 86400 AS INTEGER)
+          last_seen = $1,
+          duration_seconds = MAX(duration_seconds, CAST((julianday($1) - julianday(session_start)) * 86400 AS INTEGER))
       WHERE id = $2
     `, [now, sessionId]).catch(() => {});
 
@@ -144,7 +226,8 @@ router.post('/track', async (req, res) => {
       isNewSession,       // true on first page of session
       timeOnPrevPage,     // ms spent on previous page (sent when navigating away)
       prevPagePath,
-      consentGiven        // only track if analytics consent given
+      consentGiven,       // only track if analytics consent given
+      isAdminTest         // marked if admin logged in locally
     } = req.body;
 
     if (!consentGiven) {
@@ -162,34 +245,38 @@ router.post('/track', async (req, res) => {
     const os = parser.getOS().name || 'Unknown';
     const deviceType = parser.getDevice().type || 'desktop';
     const now = new Date().toISOString();
+    const adminTestVal = isAdminTest ? 1 : 0;
+
+    // Check if visitor is new (never seen before)
+    const existingVisitor = await query(
+      'SELECT id FROM visitor_sessions WHERE anonymous_id = $1 LIMIT 1',
+      [visitorId]
+    );
+    const isNewVisitor = existingVisitor.rows.length === 0;
 
     // Create or update session
     if (isNewSession) {
-      // Check if visitor is new (never seen before)
-      const existingVisitor = await query(
-        'SELECT id FROM visitor_sessions WHERE anonymous_id = $1 LIMIT 1',
-        [visitorId]
-      );
-      const isNewVisitor = existingVisitor.rows.length === 0;
-
       await query(`
         INSERT INTO visitor_sessions 
           (id, anonymous_id, ip_address, device_type, browser, os, referrer,
            utm_source, utm_medium, utm_campaign, landing_page, session_start,
-           page_count, is_new_visitor)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13)
-        ON CONFLICT (id) DO NOTHING
+           session_end, last_seen, page_count, duration_seconds, is_new_visitor, is_admin_test)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 1, 0, $15, $16)
+        ON CONFLICT (id) DO UPDATE SET
+          last_seen = excluded.last_seen,
+          session_end = excluded.session_end,
+          page_count = visitor_sessions.page_count + 1
       `, [
         sessionId, visitorId, ip, deviceType, browser, os,
         referrer || '', utmSource || '', utmMedium || '', utmCampaign || '',
-        pagePath, now, isNewVisitor ? 1 : 0
+        pagePath, now, now, now, isNewVisitor ? 1 : 0, adminTestVal
       ]);
     } else {
-      // Update existing session page count and end time
+      // Update existing session page count, last_seen and end time
       await query(`
         UPDATE visitor_sessions
-        SET page_count = page_count + 1, session_end = $1,
-            duration_seconds = CAST((julianday($1) - julianday(session_start)) * 86400 AS INTEGER)
+        SET page_count = page_count + 1, session_end = $1, last_seen = $1,
+            duration_seconds = MAX(duration_seconds, CAST((julianday($1) - julianday(session_start)) * 86400 AS INTEGER))
         WHERE id = $2
       `, [now, sessionId]);
     }
@@ -252,41 +339,40 @@ router.post('/consent', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/overview', requireAdminAuth, async (req, res) => {
   try {
-    const days = parseInt(req.query.range) || 30;
-    const since = new Date(Date.now() - days * 86400000).toISOString();
+    const { since, until } = getISTDateRange(req.query);
 
     const [totalSessions, uniqueVisitors, totalPageViews, newVisitors, returning, avgDuration, bounces] = await Promise.all([
-      query('SELECT COUNT(*) as cnt FROM visitor_sessions WHERE session_start >= $1', [since]),
-      query('SELECT COUNT(DISTINCT anonymous_id) as cnt FROM visitor_sessions WHERE session_start >= $1', [since]),
-      query('SELECT COUNT(*) as cnt FROM page_views pv JOIN visitor_sessions vs ON pv.session_id = vs.id WHERE vs.session_start >= $1', [since]),
-      query('SELECT COUNT(*) as cnt FROM visitor_sessions WHERE session_start >= $1 AND is_new_visitor = 1', [since]),
-      query('SELECT COUNT(*) as cnt FROM visitor_sessions WHERE session_start >= $1 AND is_new_visitor = 0', [since]),
-      query('SELECT AVG(duration_seconds) as avg FROM visitor_sessions WHERE session_start >= $1 AND duration_seconds > 0', [since]),
-      query('SELECT COUNT(*) as cnt FROM visitor_sessions WHERE session_start >= $1 AND page_count <= 1', [since])
+      query('SELECT COUNT(*) as cnt FROM visitor_sessions WHERE session_start >= $1 AND session_start <= $2', [since, until]),
+      query('SELECT COUNT(DISTINCT anonymous_id) as cnt FROM visitor_sessions WHERE session_start >= $1 AND session_start <= $2', [since, until]),
+      query('SELECT COUNT(*) as cnt FROM page_views pv JOIN visitor_sessions vs ON pv.session_id = vs.id WHERE vs.session_start >= $1 AND vs.session_start <= $2', [since, until]),
+      query('SELECT COUNT(*) as cnt FROM visitor_sessions WHERE session_start >= $1 AND session_start <= $2 AND is_new_visitor = 1', [since, until]),
+      query('SELECT COUNT(*) as cnt FROM visitor_sessions WHERE session_start >= $1 AND session_start <= $2 AND is_new_visitor = 0', [since, until]),
+      query('SELECT AVG(duration_seconds) as avg FROM visitor_sessions WHERE session_start >= $1 AND session_start <= $2 AND duration_seconds > 0', [since, until]),
+      query('SELECT COUNT(*) as cnt FROM visitor_sessions WHERE session_start >= $1 AND session_start <= $2 AND page_count <= 1', [since, until])
     ]);
 
     const totalSess = parseInt(totalSessions.rows[0]?.cnt || 0);
     const bounceCount = parseInt(bounces.rows[0]?.cnt || 0);
     const bounceRate = totalSess > 0 ? Math.round((bounceCount / totalSess) * 100) : 0;
 
-    // Real-time: sessions in last 5 minutes
-    const fiveMinAgo = new Date(Date.now() - 5 * 60000).toISOString();
+    // Real-time: active visitors within the last 120 seconds (2 minutes per spec)
+    const twoMinAgo = new Date(Date.now() - 120000).toISOString();
     const realtime = await query(
-      'SELECT COUNT(DISTINCT id) as cnt FROM visitor_sessions WHERE session_start >= $1',
-      [fiveMinAgo]
+      'SELECT COUNT(DISTINCT id) as cnt FROM visitor_sessions WHERE last_seen >= $1',
+      [twoMinAgo]
     );
 
-    // Top pages
+    // Top pages within date range
     const topPages = await query(`
       SELECT pv.page_path, pv.page_title, COUNT(*) as views
       FROM page_views pv
       JOIN visitor_sessions vs ON pv.session_id = vs.id
-      WHERE vs.session_start >= $1
+      WHERE vs.session_start >= $1 AND vs.session_start <= $2
       GROUP BY pv.page_path, pv.page_title
       ORDER BY views DESC LIMIT 10
-    `, [since]);
+    `, [since, until]);
 
-    // Traffic sources
+    // Traffic sources within date range
     const sources = await query(`
       SELECT 
         CASE 
@@ -301,11 +387,11 @@ router.get('/overview', requireAdminAuth, async (req, res) => {
         END as source,
         COUNT(*) as cnt
       FROM visitor_sessions
-      WHERE session_start >= $1
+      WHERE session_start >= $1 AND session_start <= $2
       GROUP BY source ORDER BY cnt DESC LIMIT 8
-    `, [since]);
+    `, [since, until]);
 
-    // Device distribution
+    // Device distribution within date range
     const devices = await query(`
       SELECT 
         CASE 
@@ -313,9 +399,10 @@ router.get('/overview', requireAdminAuth, async (req, res) => {
           WHEN device_type = 'tablet' THEN 'Tablet'
           ELSE 'Desktop'
         END as device, COUNT(*) as cnt
-      FROM visitor_sessions WHERE session_start >= $1
+      FROM visitor_sessions 
+      WHERE session_start >= $1 AND session_start <= $2
       GROUP BY device ORDER BY cnt DESC
-    `, [since]);
+    `, [since, until]);
 
     res.json({
       success: true,
@@ -330,7 +417,8 @@ router.get('/overview', requireAdminAuth, async (req, res) => {
         realTimeActive: parseInt(realtime.rows[0]?.cnt || 0),
         topPages: topPages.rows,
         trafficSources: sources.rows,
-        deviceDistribution: devices.rows
+        deviceDistribution: devices.rows,
+        period: { since, until }
       }
     });
   } catch (err) {
@@ -345,24 +433,23 @@ router.get('/overview', requireAdminAuth, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/chart', requireAdminAuth, async (req, res) => {
   try {
-    const days = Math.min(parseInt(req.query.range) || 7, 90);
-    const since = new Date(Date.now() - days * 86400000).toISOString();
+    const { since, until } = getISTDateRange(req.query);
 
     const sessionsData = await query(`
       SELECT DATE(session_start) as day, COUNT(*) as sessions,
              COUNT(DISTINCT anonymous_id) as unique_visitors
       FROM visitor_sessions
-      WHERE session_start >= $1
+      WHERE session_start >= $1 AND session_start <= $2
       GROUP BY day ORDER BY day ASC
-    `, [since]);
+    `, [since, until]);
 
     const pageViewsData = await query(`
       SELECT DATE(pv.viewed_at) as day, COUNT(*) as page_views
       FROM page_views pv
       JOIN visitor_sessions vs ON pv.session_id = vs.id
-      WHERE vs.session_start >= $1
+      WHERE vs.session_start >= $1 AND vs.session_start <= $2
       GROUP BY day ORDER BY day ASC
-    `, [since]);
+    `, [since, until]);
 
     res.json({ success: true, chart: { sessions: sessionsData.rows, pageViews: pageViewsData.rows } });
   } catch (err) {
@@ -372,7 +459,7 @@ router.get('/chart', requireAdminAuth, async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ADMIN: Visitor list (paginated)
-// GET /api/analytics/visitors?page=1&limit=25&search=&dateFrom=&dateTo=
+// GET /api/analytics/visitors?page=1&limit=25&search=&dateFrom=&dateTo=&range=
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/visitors', requireAdminAuth, async (req, res) => {
   try {
@@ -387,8 +474,15 @@ router.get('/visitors', requireAdminAuth, async (req, res) => {
     let params = [];
     let idx = 1;
 
-    if (dateFrom) { conditions.push(`session_start >= $${idx++}`); params.push(dateFrom); }
-    if (dateTo) { conditions.push(`session_start <= $${idx++}`); params.push(dateTo + 'T23:59:59'); }
+    if (dateFrom || dateTo) {
+      if (dateFrom) { conditions.push(`session_start >= $${idx++}`); params.push(dateFrom); }
+      if (dateTo) { conditions.push(`session_start <= $${idx++}`); params.push(dateTo + 'T23:59:59.999Z'); }
+    } else if (req.query.range || req.query.startDate) {
+      const { since, until } = getISTDateRange(req.query);
+      conditions.push(`session_start >= $${idx++}`); params.push(since);
+      conditions.push(`session_start <= $${idx++}`); params.push(until);
+    }
+
     if (device) { conditions.push(`device_type = $${idx++}`); params.push(device); }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
@@ -398,7 +492,7 @@ router.get('/visitors', requireAdminAuth, async (req, res) => {
         SELECT id, anonymous_id, 
                CASE WHEN LENGTH(ip_address) > 7 THEN SUBSTR(ip_address, 1, INSTR(ip_address || '.', '.') + 2) || '.*.*' ELSE '—' END as ip_masked,
                device_type, browser, os, referrer, utm_source, utm_medium, utm_campaign,
-               landing_page, session_start, session_end, page_count, duration_seconds, is_new_visitor
+               landing_page, session_start, session_end, last_seen, page_count, duration_seconds, is_new_visitor
         FROM visitor_sessions ${where}
         ORDER BY session_start DESC LIMIT $${idx} OFFSET $${idx + 1}
       `, [...params, limit, offset]),
@@ -430,23 +524,24 @@ router.get('/visitors/:sessionId', requireAdminAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ADMIN: Real-time active visitors (last 5 min)
+// ADMIN: Real-time active visitors (heartbeat / last seen within 120 seconds)
 // GET /api/analytics/realtime
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/realtime', requireAdminAuth, async (req, res) => {
   try {
-    const fiveMinAgo = new Date(Date.now() - 5 * 60000).toISOString();
-    // Get sessions active in last 5 min (either started or had a page view)
+    const twoMinAgo = new Date(Date.now() - 120000).toISOString();
     const active = await query(`
-      SELECT vs.id, vs.anonymous_id, vs.device_type, vs.browser, vs.session_start,
-             pv.page_path, pv.page_title, pv.viewed_at as last_page_time
+      SELECT vs.id, vs.anonymous_id, vs.device_type, vs.browser, vs.session_start, vs.last_seen,
+             COALESCE(pv.page_path, vs.landing_page) as page_path,
+             COALESCE(pv.page_title, vs.landing_page) as page_title,
+             COALESCE(pv.viewed_at, vs.last_seen) as last_page_time
       FROM visitor_sessions vs
       LEFT JOIN page_views pv ON pv.session_id = vs.id
         AND pv.viewed_at = (SELECT MAX(viewed_at) FROM page_views WHERE session_id = vs.id)
-      WHERE vs.session_start >= $1 OR pv.viewed_at >= $1
-      ORDER BY COALESCE(pv.viewed_at, vs.session_start) DESC
+      WHERE vs.last_seen >= $1 OR vs.session_start >= $1
+      ORDER BY COALESCE(vs.last_seen, vs.session_start) DESC
       LIMIT 50
-    `, [fiveMinAgo]);
+    `, [twoMinAgo]);
 
     res.json({ success: true, activeVisitors: active.rows, timestamp: new Date().toISOString() });
   } catch (err) {
