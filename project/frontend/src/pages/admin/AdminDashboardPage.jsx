@@ -7,6 +7,8 @@ import { AdminAPI } from '../../services/api';
 import CmsManager from '../../components/admin/CmsManager';
 import SoftwareManager from '../../components/admin/SoftwareManager';
 import MediaLibrary from '../../components/admin/MediaLibrary';
+import AnalyticsSection from '../../components/admin/AnalyticsSection';
+import SecuritySection from '../../components/admin/SecuritySection';
 import '../../styles/admin.css';
 import {
   IconChart,
@@ -31,7 +33,9 @@ import {
   IconYouTube,
   IconVideo,
   IconInfo,
-  IconClock
+  IconClock,
+  IconActivity,
+  IconShieldCheck
 } from '../../components/common/Icons';
 
 const formatImgSrc = (url) => {
@@ -835,6 +839,8 @@ export default function AdminDashboardPage() {
         <nav className="sidebar-nav" style={{ padding: '1rem 0.5rem', flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
           {[
             { id: 'sectionDashboard', label: 'Dashboard', icon: IconChart },
+            { id: 'sectionAnalytics', label: 'Visitor Analytics', icon: IconActivity },
+            { id: 'sectionSecurity', label: 'Security Log', icon: IconShieldCheck },
             { id: 'sectionCms', label: 'Website Content', icon: IconGlobe },
             { id: 'sectionSoftware', label: 'Software & Downloads', icon: IconLaptop },
             { id: 'sectionMedia', label: 'Media Library', icon: IconFolder },
@@ -1784,6 +1790,12 @@ export default function AdminDashboardPage() {
               </div>
             </section>
           )}
+
+          {/* ANALYTICS SECTION */}
+          {activeSection === 'sectionAnalytics' && <AnalyticsSection />}
+
+          {/* SECURITY SECTION */}
+          {activeSection === 'sectionSecurity' && <SecuritySection />}
 
           {/* 7. INQUIRIES & LEADS MANAGEMENT */}
           {activeSection === 'sectionInquiries' && (

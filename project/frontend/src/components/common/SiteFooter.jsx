@@ -144,6 +144,13 @@ export default function SiteFooter() {
           <div className="footer-legal-links">
             <Link to="/contact">Privacy Policy</Link>
             <Link to="/contact">Terms of Service</Link>
+            <Link to="/cookies">Cookie Policy</Link>
+            <button
+              onClick={() => window.dispatchEvent(new Event('openCookiePreferences'))}
+              style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 'inherit', padding: 0, fontFamily: 'inherit' }}
+            >
+              Cookie Settings
+            </button>
             <a href="https://osemi.in" target="_blank" rel="noopener noreferrer">Fulfillment via OSEMI</a>
           </div>
         </div>

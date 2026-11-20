@@ -1,10 +1,14 @@
 const authService = require('../services/auth.service');
 const { recordAuditLog } = require('../middleware/auth');
+const { query } = require('../config/db');
+const { randomUUID } = require('crypto');
 
 class AuthController {
   async login(req, res) {
+    const ip = (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+    const { username, password } = req.body;
+
     try {
-      const { username, password } = req.body;
       const { token, user } = await authService.login(username, password);
 
       res.cookie('oxybott_token', token, {
@@ -17,12 +21,24 @@ class AuthController {
       req.user = user;
       await recordAuditLog(req, 'LOGIN', 'USER', user.id, `User ${user.username} logged in successfully`);
 
+      // Log successful login security event
+      await query(`
+        INSERT INTO security_events (id, event_type, ip_address, username, details, severity, created_at)
+        VALUES ($1, 'successful_login', $2, $3, $4, 'info', CURRENT_TIMESTAMP)
+      `, [randomUUID(), ip, user.username, `Successful login for ${user.username}`]).catch(() => {});
+
       res.json({
         success: true,
         token,
         user
       });
     } catch (err) {
+      // Log failed login security event
+      await query(`
+        INSERT INTO security_events (id, event_type, ip_address, username, details, severity, created_at)
+        VALUES ($1, 'failed_login', $2, $3, $4, 'medium', CURRENT_TIMESTAMP)
+      `, [randomUUID(), ip, username || '', `Failed login attempt: ${err.message}`]).catch(() => {});
+
       const statusCode = err.message.includes('required') ? 400 : 401;
       res.status(statusCode).json({ success: false, error: err.message });
     }

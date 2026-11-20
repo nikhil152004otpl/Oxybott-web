@@ -11,6 +11,8 @@ const tutorialsRoutes = require('./tutorials.routes');
 const cmsRoutes = require('./cms.routes');
 const softwareRoutes = require('./software.routes');
 const adminRoutes = require('./admin.routes');
+const analyticsRoutes = require('./analytics.routes');
+const securityRoutes = require('./security.routes');
 
 // Mount routes
 router.use('/products', productsRoutes);
@@ -23,6 +25,8 @@ router.use('/tutorials', tutorialsRoutes);
 router.use('/cms', cmsRoutes);
 router.use('/software', softwareRoutes);
 router.use('/admin', adminRoutes);
+router.use('/analytics', analyticsRoutes);
+router.use('/security', securityRoutes);
 
 module.exports = router;
 

@@ -3,6 +3,8 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const cookieParser = require('cookie-parser');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const apiRoutes = require('./routes');
@@ -12,6 +14,56 @@ const app = express();
 
 // Security check
 validateAuthConfiguration();
+
+// Security headers (Helmet)
+app.use(helmet({
+  contentSecurityPolicy: false, // Configured separately if needed
+  crossOriginEmbedderPolicy: false
+}));
+app.use(helmet.referrerPolicy({ policy: 'strict-origin-when-cross-origin' }));
+
+// General rate limiting
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests, please try again later.' }
+});
+
+// Strict rate limiting for auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many login attempts. Please wait 15 minutes.' },
+  handler: async (req, res, next, options) => {
+    // Log brute-force attempt to security_events
+    try {
+      const { query } = require('./config/db');
+      const { randomUUID } = require('crypto');
+      const ip = (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+      await query(`
+        INSERT INTO security_events (id, event_type, ip_address, username, details, severity, created_at)
+        VALUES ($1, 'rate_limit_exceeded', $2, $3, $4, 'high', CURRENT_TIMESTAMP)
+      `, [randomUUID(), ip, req.body?.username || '', `Rate limit hit on ${req.path}`]).catch(() => {});
+    } catch {}
+    res.status(options.statusCode).json(options.message);
+  }
+});
+
+// Lightweight analytics tracking limiter
+const trackLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: false,
+  legacyHeaders: false
+});
+
+app.use('/api', generalLimiter);
+app.use('/api/admin/auth', authLimiter);
+app.use('/api/analytics/track', trackLimiter);
 
 // CORS configuration
 const allowedOrigins = [

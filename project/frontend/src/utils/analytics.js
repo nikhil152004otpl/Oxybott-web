@@ -1,0 +1,133 @@
+/**
+ * Oxybott Analytics Tracker
+ * 
+ * - Generates anonymous visitor ID (non-PII)
+ * - Tracks SPA page views on route changes
+ * - Respects cookie consent (only tracks if analytics accepted)
+ * - Deduplicates events, captures UTMs and referrer
+ */
+
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
+// ─── ID helpers ──────────────────────────────────────────────────────────────
+function generateId() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+function getVisitorId() {
+  let id = localStorage.getItem('_oxv');
+  if (!id) { id = generateId(); localStorage.setItem('_oxv', id); }
+  return id;
+}
+
+function getSessionId() {
+  // Session expires after 30 min of inactivity
+  const KEY = '_oxs';
+  const TS_KEY = '_oxst';
+  const TIMEOUT = 30 * 60 * 1000;
+  const now = Date.now();
+  const lastActive = parseInt(sessionStorage.getItem(TS_KEY) || '0');
+  let sid = sessionStorage.getItem(KEY);
+
+  if (!sid || (now - lastActive) > TIMEOUT) {
+    sid = generateId();
+    sessionStorage.setItem(KEY, sid);
+    sessionStorage.setItem('_oxsnew', '1'); // Mark as new session
+  }
+  sessionStorage.setItem(TS_KEY, now.toString());
+  return sid;
+}
+
+function isNewSession() {
+  const isNew = sessionStorage.getItem('_oxsnew') === '1';
+  if (isNew) sessionStorage.removeItem('_oxsnew');
+  return isNew;
+}
+
+// ─── Consent check ───────────────────────────────────────────────────────────
+function hasAnalyticsConsent() {
+  try {
+    const prefs = localStorage.getItem('_oxconsent');
+    if (!prefs) return false;
+    const parsed = JSON.parse(prefs);
+    return parsed?.analytics === true;
+  } catch { return false; }
+}
+
+// ─── UTM params ──────────────────────────────────────────────────────────────
+function getUtmParams() {
+  const url = new URL(window.location.href);
+  return {
+    utmSource: url.searchParams.get('utm_source') || '',
+    utmMedium: url.searchParams.get('utm_medium') || '',
+    utmCampaign: url.searchParams.get('utm_campaign') || ''
+  };
+}
+
+// ─── Send beacon ─────────────────────────────────────────────────────────────
+let lastPath = '';
+let pageEntryTime = Date.now();
+
+async function trackPageView(path, title) {
+  if (!hasAnalyticsConsent()) return;
+
+  const visitorId = getVisitorId();
+  const sessionId = getSessionId();
+  const newSession = isNewSession();
+  const prevPath = lastPath;
+  const timeOnPrevPage = prevPath ? Date.now() - pageEntryTime : null;
+
+  // Don't double-track same path
+  if (path === lastPath && !newSession) return;
+
+  const prevPagePath = lastPath;
+  lastPath = path;
+  pageEntryTime = Date.now();
+
+  const payload = {
+    visitorId,
+    sessionId,
+    pagePath: path,
+    pageTitle: title || document.title,
+    referrer: newSession ? document.referrer : '',
+    ...getUtmParams(),
+    isNewSession: newSession,
+    timeOnPrevPage,
+    prevPagePath,
+    consentGiven: true
+  };
+
+  try {
+    await fetch(`${API_BASE}/analytics/track`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      keepalive: true
+    });
+  } catch { /* Silent fail – never break frontend */ }
+}
+
+// ─── Consent sync ────────────────────────────────────────────────────────────
+export async function syncConsent(preferences) {
+  const visitorId = getVisitorId();
+  try {
+    await fetch(`${API_BASE}/analytics/consent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        visitorId,
+        analytics: preferences.analytics,
+        functional: preferences.functional,
+        marketing: preferences.marketing,
+        version: '1.0'
+      })
+    });
+  } catch {}
+}
+
+// ─── Public exports ───────────────────────────────────────────────────────────
+export { trackPageView, getVisitorId };
+export default { trackPageView, syncConsent, getVisitorId };

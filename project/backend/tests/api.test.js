@@ -602,3 +602,99 @@ test('17. Software & Multi-Platform Downloads (Catalog, Admin CRUD, download end
   assert.equal(delRes.status, 200);
   assert.equal(delData.success, true);
 });
+
+test('18. Visitor Analytics & Cookie Consent (Tracking, Consent Sync, Admin Overview)', async () => {
+  // Public cookie consent recording
+  const consentRes = await fetch(`${baseUrl}/api/analytics/consent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      visitorId: 'test-visitor-uuid-1234',
+      analytics: true,
+      functional: true,
+      marketing: false,
+      version: '1.0'
+    })
+  });
+  const consentData = await consentRes.json();
+  assert.equal(consentRes.status, 200);
+  assert.equal(consentData.success, true);
+
+  // Public track page view
+  const trackRes = await fetch(`${baseUrl}/api/analytics/track`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      visitorId: 'test-visitor-uuid-1234',
+      sessionId: 'test-session-uuid-5678',
+      pagePath: '/products/qd001',
+      pageTitle: 'QD001 Mecanum Robot Car',
+      isNewSession: true,
+      consentGiven: true
+    })
+  });
+  const trackData = await trackRes.json();
+  assert.equal(trackRes.status, 200);
+  assert.equal(trackData.success, true);
+
+  // Admin get analytics overview
+  const overviewRes = await fetch(`${baseUrl}/api/analytics/overview?range=30`, {
+    headers: {
+      'Authorization': `Bearer ${adminToken}`,
+      'X-Requested-With': 'XMLHttpRequest'
+    }
+  });
+  const overviewData = await overviewRes.json();
+  assert.equal(overviewRes.status, 200);
+  assert.equal(overviewData.success, true);
+  assert.ok(overviewData.overview);
+  assert.ok(typeof overviewData.overview.totalSessions === 'number');
+
+  // Admin get chart data
+  const chartRes = await fetch(`${baseUrl}/api/analytics/chart?range=7`, {
+    headers: {
+      'Authorization': `Bearer ${adminToken}`,
+      'X-Requested-With': 'XMLHttpRequest'
+    }
+  });
+  const chartData = await chartRes.json();
+  assert.equal(chartRes.status, 200);
+  assert.equal(chartData.success, true);
+  assert.ok(Array.isArray(chartData.chart.sessions));
+});
+
+test('19. Security Monitoring (Admin Security Events, Top IPs, Export)', async () => {
+  // Admin get security events
+  const eventsRes = await fetch(`${baseUrl}/api/security/events?days=30`, {
+    headers: {
+      'Authorization': `Bearer ${adminToken}`,
+      'X-Requested-With': 'XMLHttpRequest'
+    }
+  });
+  const eventsData = await eventsRes.json();
+  assert.equal(eventsRes.status, 200);
+  assert.equal(eventsData.success, true);
+  assert.ok(Array.isArray(eventsData.events));
+
+  // Admin get top IPs
+  const ipsRes = await fetch(`${baseUrl}/api/security/top-ips?days=7`, {
+    headers: {
+      'Authorization': `Bearer ${adminToken}`,
+      'X-Requested-With': 'XMLHttpRequest'
+    }
+  });
+  const ipsData = await ipsRes.json();
+  assert.equal(ipsRes.status, 200);
+  assert.equal(ipsData.success, true);
+  assert.ok(Array.isArray(ipsData.topIps));
+
+  // Admin export security CSV
+  const exportRes = await fetch(`${baseUrl}/api/security/export?days=7`, {
+    headers: {
+      'Authorization': `Bearer ${adminToken}`,
+      'X-Requested-With': 'XMLHttpRequest'
+    }
+  });
+  assert.equal(exportRes.status, 200);
+  assert.equal(exportRes.headers.get('content-type').includes('text/csv'), true);
+});

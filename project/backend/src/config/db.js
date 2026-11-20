@@ -264,6 +264,71 @@ function getSqliteFallback() {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // ── Analytics & Security Tables ──────────────────────────────────────────
+    sqliteDb.exec(`
+      CREATE TABLE IF NOT EXISTS visitor_sessions (
+        id TEXT PRIMARY KEY,
+        anonymous_id TEXT NOT NULL,
+        ip_address TEXT,
+        device_type TEXT DEFAULT 'desktop',
+        browser TEXT,
+        os TEXT,
+        referrer TEXT DEFAULT '',
+        utm_source TEXT DEFAULT '',
+        utm_medium TEXT DEFAULT '',
+        utm_campaign TEXT DEFAULT '',
+        landing_page TEXT,
+        session_start DATETIME DEFAULT CURRENT_TIMESTAMP,
+        session_end DATETIME,
+        page_count INTEGER DEFAULT 1,
+        duration_seconds INTEGER DEFAULT 0,
+        is_new_visitor INTEGER DEFAULT 1
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vs_anonymous_id ON visitor_sessions(anonymous_id);
+      CREATE INDEX IF NOT EXISTS idx_vs_session_start ON visitor_sessions(session_start);
+
+      CREATE TABLE IF NOT EXISTS page_views (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        page_path TEXT NOT NULL,
+        page_title TEXT DEFAULT '',
+        viewed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        time_on_page INTEGER,
+        FOREIGN KEY(session_id) REFERENCES visitor_sessions(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_pv_session_id ON page_views(session_id);
+      CREATE INDEX IF NOT EXISTS idx_pv_viewed_at ON page_views(viewed_at);
+
+      CREATE TABLE IF NOT EXISTS security_events (
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        ip_address TEXT,
+        username TEXT,
+        details TEXT,
+        severity TEXT DEFAULT 'medium',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_se_created_at ON security_events(created_at);
+      CREATE INDEX IF NOT EXISTS idx_se_ip_address ON security_events(ip_address);
+
+      CREATE TABLE IF NOT EXISTS cookie_consents (
+        id TEXT PRIMARY KEY,
+        anonymous_id TEXT UNIQUE NOT NULL,
+        analytics_accepted INTEGER DEFAULT 0,
+        functional_accepted INTEGER DEFAULT 0,
+        marketing_accepted INTEGER DEFAULT 0,
+        consent_version TEXT DEFAULT '1.0',
+        ip_address TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_cc_anonymous_id ON cookie_consents(anonymous_id);
+    `);
   }
   return sqliteDb;
 }
