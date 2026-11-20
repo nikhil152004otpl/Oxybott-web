@@ -35,7 +35,9 @@ import {
   IconInfo,
   IconClock,
   IconActivity,
-  IconShieldCheck
+  IconShieldCheck,
+  IconX,
+  IconPlay
 } from '../../components/common/Icons';
 
 const formatImgSrc = (url) => {
