@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../../context/StoreContext';
 import { IconX } from '../common/Icons';
+import { trackSearch, trackEvent } from '../../utils/analytics';
 
 export default function SearchModal({ isOpen, onClose }) {
   const { products, formatPrice } = useStore();
@@ -46,7 +47,15 @@ export default function SearchModal({ isOpen, onClose }) {
       )
     : [];
 
+  useEffect(() => {
+    if (cleanQ.length >= 2) {
+      trackSearch(cleanQ, matches.length);
+    }
+  }, [cleanQ, matches.length]);
+
   const handleSelectProduct = (productId) => {
+    trackSearch(cleanQ, matches.length, productId);
+    trackEvent('search_result_click', 'product', productId, cleanQ);
     onClose();
     navigate(`/products/${productId}`);
   };

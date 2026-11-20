@@ -8,6 +8,124 @@ const { query } = require('../config/db');
 const { UAParser } = require('ua-parser-js');
 const { randomUUID } = require('crypto');
 
+// Helper to parse date ranges (today, yesterday, 7, 30, 90, custom)
+function parseDateRange(queryObj) {
+  const now = new Date();
+  let since = new Date(now.getTime() - 30 * 86400000).toISOString();
+  let until = now.toISOString();
+
+  const r = (queryObj.range || '').toString().toLowerCase();
+
+  if (r === 'today') {
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    since = startOfToday.toISOString();
+  } else if (r === 'yesterday') {
+    const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const endOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, -1);
+    since = startOfYesterday.toISOString();
+    until = endOfYesterday.toISOString();
+  } else if (queryObj.startDate) {
+    since = new Date(queryObj.startDate).toISOString();
+    if (queryObj.endDate) {
+      const endD = new Date(queryObj.endDate);
+      endD.setHours(23, 59, 59, 999);
+      until = endD.toISOString();
+    }
+  } else {
+    const days = parseInt(r) || 30;
+    since = new Date(now.getTime() - days * 86400000).toISOString();
+  }
+
+  return { since, until };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC: Track custom interaction events (buy_now_click, video_*, download, etc.)
+// POST /api/analytics/event
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/event', async (req, res) => {
+  try {
+    const {
+      visitorId,
+      sessionId,
+      eventType,
+      entityType,
+      entityId,
+      entityTitle,
+      metadata,
+      pagePath,
+      consentGiven
+    } = req.body;
+
+    if (!consentGiven) {
+      return res.json({ success: true, message: 'Tracking skipped: no consent' });
+    }
+
+    if (!visitorId || !sessionId || !eventType) {
+      return res.json({ success: true, message: 'Insufficient event data' });
+    }
+
+    const eventId = randomUUID();
+    const metaStr = typeof metadata === 'object' ? JSON.stringify(metadata) : String(metadata || '{}');
+    const now = new Date().toISOString();
+
+    await query(`
+      INSERT INTO analytics_events 
+        (id, session_id, anonymous_id, event_type, entity_type, entity_id, entity_title, metadata, page_path, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `, [eventId, sessionId, visitorId, eventType, entityType || '', entityId || '', entityTitle || '', metaStr, pagePath || '', now]);
+
+    // Keep session alive
+    await query(`
+      UPDATE visitor_sessions
+      SET session_end = $1,
+          duration_seconds = CAST((julianday($1) - julianday(session_start)) * 86400 AS INTEGER)
+      WHERE id = $2
+    `, [now, sessionId]).catch(() => {});
+
+    res.json({ success: true, eventId });
+  } catch (err) {
+    console.error('[Analytics Event Error]', err.message);
+    res.json({ success: true });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC: Track internal search queries
+// POST /api/analytics/search
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/search', async (req, res) => {
+  try {
+    const {
+      visitorId,
+      sessionId,
+      queryText,
+      resultCount,
+      clickedEntityId,
+      pagePath,
+      consentGiven
+    } = req.body;
+
+    if (!consentGiven || !queryText || !queryText.trim()) {
+      return res.json({ success: true });
+    }
+
+    const searchId = randomUUID();
+    const now = new Date().toISOString();
+
+    await query(`
+      INSERT INTO search_queries
+        (id, session_id, anonymous_id, query_text, result_count, clicked_entity_id, page_path, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `, [searchId, sessionId || 'anonymous', visitorId || 'anonymous', queryText.trim().toLowerCase(), parseInt(resultCount) || 0, clickedEntityId || '', pagePath || '', now]);
+
+    res.json({ success: true, searchId });
+  } catch (err) {
+    console.error('[Analytics Search Error]', err.message);
+    res.json({ success: true });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PUBLIC: Track page view (called by frontend tracker)
 // POST /api/analytics/track
@@ -337,20 +455,550 @@ router.get('/realtime', requireAdminAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ADMIN: Export CSV
+// ADMIN: Top Pages Analytics (with page type filter and engagement time)
+// GET /api/analytics/top-pages?range=30&pageType=all
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/top-pages', requireAdminAuth, async (req, res) => {
+  try {
+    const { since, until } = parseDateRange(req.query);
+    const pageType = (req.query.pageType || 'all').toLowerCase();
+
+    let pathFilter = '';
+    if (pageType === 'product' || pageType === 'products') {
+      pathFilter = "AND pv.page_path LIKE '/products/%'";
+    } else if (pageType === 'tutorial' || pageType === 'tutorials') {
+      pathFilter = "AND (pv.page_path LIKE '/tutorials%' OR pv.page_path LIKE '%guide%')";
+    } else if (pageType === 'software') {
+      pathFilter = "AND pv.page_path LIKE '/software%'";
+    } else if (pageType === 'education') {
+      pathFilter = "AND pv.page_path LIKE '/education%'";
+    }
+
+    const pages = await query(`
+      SELECT 
+        pv.page_path,
+        MAX(pv.page_title) as page_title,
+        COUNT(*) as views,
+        COUNT(DISTINCT vs.anonymous_id) as unique_visitors,
+        AVG(CASE WHEN pv.time_on_page > 0 THEN pv.time_on_page ELSE NULL END) as avg_seconds,
+        SUM(CASE WHEN vs.landing_page = pv.page_path THEN 1 ELSE 0 END) as landing_count,
+        SUM(CASE WHEN vs.session_end IS NOT NULL AND pv.viewed_at = (
+          SELECT MAX(sub.viewed_at) FROM page_views sub WHERE sub.session_id = vs.id
+        ) THEN 1 ELSE 0 END) as exit_count
+      FROM page_views pv
+      JOIN visitor_sessions vs ON pv.session_id = vs.id
+      WHERE pv.viewed_at >= $1 AND pv.viewed_at <= $2 ${pathFilter}
+      GROUP BY pv.page_path
+      ORDER BY views DESC
+      LIMIT 100
+    `, [since, until]);
+
+    res.json({
+      success: true,
+      pages: pages.rows.map(p => ({
+        ...p,
+        views: parseInt(p.views || 0),
+        unique_visitors: parseInt(p.unique_visitors || 0),
+        avg_seconds: Math.round(parseFloat(p.avg_seconds || 0)),
+        landing_count: parseInt(p.landing_count || 0),
+        exit_count: parseInt(p.exit_count || 0)
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Product Interest Analytics & Buy Now CTR
+// GET /api/analytics/products?range=30
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/products', requireAdminAuth, async (req, res) => {
+  try {
+    const { since, until } = parseDateRange(req.query);
+
+    // Get all products from database for catalog lookup
+    const allProds = await query('SELECT id, name, sku, series, price, osemi_url FROM products ORDER BY name ASC');
+
+    // Aggregate page views for products
+    const pvStats = await query(`
+      SELECT 
+        pv.page_path,
+        COUNT(*) as views,
+        COUNT(DISTINCT vs.anonymous_id) as unique_visitors
+      FROM page_views pv
+      JOIN visitor_sessions vs ON pv.session_id = vs.id
+      WHERE pv.viewed_at >= $1 AND pv.viewed_at <= $2
+        AND pv.page_path LIKE '/products/%'
+      GROUP BY pv.page_path
+    `, [since, until]);
+
+    // Aggregate events (buy_now_click, document_download, gallery_interaction, specs_view)
+    const evStats = await query(`
+      SELECT 
+        entity_id,
+        event_type,
+        COUNT(*) as total_events,
+        COUNT(DISTINCT anonymous_id) as unique_users
+      FROM analytics_events
+      WHERE created_at >= $1 AND created_at <= $2
+      GROUP BY entity_id, event_type
+    `, [since, until]);
+
+    // Map stats by product ID or slug
+    const prodMap = {};
+    allProds.rows.forEach(p => {
+      prodMap[p.id] = {
+        id: p.id,
+        name: p.name,
+        sku: p.sku || p.id,
+        series: p.series || '',
+        price: p.price,
+        osemi_url: p.osemi_url,
+        views: 0,
+        unique_visitors: 0,
+        buy_now_clicks: 0,
+        unique_buy_clickers: 0,
+        ctr: 0,
+        datasheet_downloads: 0,
+        gallery_interactions: 0,
+        specs_views: 0
+      };
+    });
+
+    // Merge page views
+    pvStats.rows.forEach(pv => {
+      const parts = pv.page_path.split('/products/');
+      if (parts[1]) {
+        const prodId = parts[1].split('?')[0].split('/')[0];
+        if (prodMap[prodId]) {
+          prodMap[prodId].views += parseInt(pv.views || 0);
+          prodMap[prodId].unique_visitors += parseInt(pv.unique_visitors || 0);
+        } else {
+          // If product not in catalog (or slug differs), register as row
+          prodMap[prodId] = {
+            id: prodId,
+            name: prodId,
+            sku: prodId,
+            series: '',
+            price: 0,
+            views: parseInt(pv.views || 0),
+            unique_visitors: parseInt(pv.unique_visitors || 0),
+            buy_now_clicks: 0,
+            unique_buy_clickers: 0,
+            ctr: 0,
+            datasheet_downloads: 0,
+            gallery_interactions: 0,
+            specs_views: 0
+          };
+        }
+      }
+    });
+
+    // Merge events
+    evStats.rows.forEach(ev => {
+      const pid = ev.entity_id;
+      if (pid && prodMap[pid]) {
+        if (ev.event_type === 'buy_now_click') {
+          prodMap[pid].buy_now_clicks += parseInt(ev.total_events || 0);
+          prodMap[pid].unique_buy_clickers += parseInt(ev.unique_users || 0);
+        } else if (ev.event_type === 'document_download') {
+          prodMap[pid].datasheet_downloads += parseInt(ev.total_events || 0);
+        } else if (ev.event_type === 'gallery_interaction') {
+          prodMap[pid].gallery_interactions += parseInt(ev.total_events || 0);
+        } else if (ev.event_type === 'specs_interaction') {
+          prodMap[pid].specs_views += parseInt(ev.total_events || 0);
+        }
+      }
+    });
+
+    // Calculate CTR: Unique Buy Clickers / Unique Product Visitors * 100
+    const list = Object.values(prodMap).map(p => {
+      const ctr = p.unique_visitors > 0
+        ? parseFloat(((p.unique_buy_clickers / p.unique_visitors) * 100).toFixed(1))
+        : (p.buy_now_clicks > 0 ? 100 : 0);
+      return { ...p, ctr };
+    });
+
+    // Sort by views desc
+    list.sort((a, b) => (b.views + b.buy_now_clicks) - (a.views + a.buy_now_clicks));
+
+    res.json({ success: true, products: list });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: External Purchase Clicks Log & Analytics
+// GET /api/analytics/external-clicks?range=30
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/external-clicks', requireAdminAuth, async (req, res) => {
+  try {
+    const { since, until } = parseDateRange(req.query);
+
+    const clicks = await query(`
+      SELECT 
+        ae.id,
+        ae.entity_id as product_id,
+        ae.entity_title as product_name,
+        ae.created_at,
+        ae.page_path as source_page,
+        ae.metadata,
+        vs.device_type,
+        vs.browser,
+        vs.os,
+        vs.referrer,
+        vs.utm_source,
+        vs.utm_medium,
+        vs.utm_campaign,
+        vs.anonymous_id
+      FROM analytics_events ae
+      LEFT JOIN visitor_sessions vs ON ae.session_id = vs.id
+      WHERE ae.event_type = 'buy_now_click'
+        AND ae.created_at >= $1 AND ae.created_at <= $2
+      ORDER BY ae.created_at DESC
+      LIMIT 200
+    `, [since, until]);
+
+    // Aggregate summary metrics
+    const totalClicks = clicks.rows.length;
+    const uniqueClickers = new Set(clicks.rows.map(c => c.anonymous_id)).size;
+
+    res.json({
+      success: true,
+      totalClicks,
+      uniqueClickers,
+      clicks: clicks.rows
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Video Engagement Analytics
+// GET /api/analytics/videos?range=30
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/videos', requireAdminAuth, async (req, res) => {
+  try {
+    const { since, until } = parseDateRange(req.query);
+
+    const stats = await query(`
+      SELECT 
+        entity_id,
+        entity_title,
+        SUM(CASE WHEN event_type = 'video_impression' THEN 1 ELSE 0 END) as impressions,
+        SUM(CASE WHEN event_type = 'video_play' THEN 1 ELSE 0 END) as plays,
+        COUNT(DISTINCT CASE WHEN event_type = 'video_play' THEN anonymous_id END) as unique_viewers,
+        SUM(CASE WHEN event_type = 'video_progress_25' THEN 1 ELSE 0 END) as progress_25,
+        SUM(CASE WHEN event_type = 'video_progress_50' THEN 1 ELSE 0 END) as progress_50,
+        SUM(CASE WHEN event_type = 'video_progress_75' THEN 1 ELSE 0 END) as progress_75,
+        SUM(CASE WHEN event_type = 'video_complete_100' THEN 1 ELSE 0 END) as complete_100
+      FROM analytics_events
+      WHERE (event_type LIKE 'video_%')
+        AND created_at >= $1 AND created_at <= $2
+      GROUP BY entity_id, entity_title
+      ORDER BY plays DESC
+    `, [since, until]);
+
+    res.json({
+      success: true,
+      videos: stats.rows.map(v => {
+        const plays = parseInt(v.plays || 0);
+        const comp = parseInt(v.complete_100 || 0);
+        const completionRate = plays > 0 ? Math.round((comp / plays) * 100) : 0;
+        return {
+          ...v,
+          impressions: parseInt(v.impressions || 0),
+          plays,
+          unique_viewers: parseInt(v.unique_viewers || 0),
+          progress_25: parseInt(v.progress_25 || 0),
+          progress_50: parseInt(v.progress_50 || 0),
+          progress_75: parseInt(v.progress_75 || 0),
+          complete_100: comp,
+          completionRate
+        };
+      })
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Tutorial & Guide Analytics
+// GET /api/analytics/tutorials?range=30
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/tutorials', requireAdminAuth, async (req, res) => {
+  try {
+    const { since, until } = parseDateRange(req.query);
+
+    // Tutorials views & engagement
+    const tutViews = await query(`
+      SELECT 
+        pv.page_path,
+        MAX(pv.page_title) as title,
+        COUNT(*) as views,
+        COUNT(DISTINCT vs.anonymous_id) as unique_readers,
+        AVG(CASE WHEN pv.time_on_page > 0 THEN pv.time_on_page ELSE NULL END) as avg_seconds
+      FROM page_views pv
+      JOIN visitor_sessions vs ON pv.session_id = vs.id
+      WHERE pv.viewed_at >= $1 AND pv.viewed_at <= $2
+        AND (pv.page_path LIKE '/tutorials%' OR pv.page_path LIKE '%guide%')
+      GROUP BY pv.page_path
+      ORDER BY views DESC
+    `, [since, until]);
+
+    // PDF Guide downloads
+    const downloads = await query(`
+      SELECT 
+        entity_id,
+        entity_title,
+        COUNT(*) as downloads,
+        COUNT(DISTINCT anonymous_id) as unique_downloaders
+      FROM analytics_events
+      WHERE event_type = 'document_download'
+        AND created_at >= $1 AND created_at <= $2
+      GROUP BY entity_id, entity_title
+      ORDER BY downloads DESC
+    `, [since, until]);
+
+    res.json({
+      success: true,
+      tutorials: tutViews.rows.map(t => ({
+        ...t,
+        views: parseInt(t.views || 0),
+        unique_readers: parseInt(t.unique_readers || 0),
+        avg_seconds: Math.round(parseFloat(t.avg_seconds || 0))
+      })),
+      downloads: downloads.rows.map(d => ({
+        ...d,
+        downloads: parseInt(d.downloads || 0),
+        unique_downloaders: parseInt(d.unique_downloaders || 0)
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Internal Search Analytics & Zero-Result Failed Searches
+// GET /api/analytics/searches?range=30
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/searches', requireAdminAuth, async (req, res) => {
+  try {
+    const { since, until } = parseDateRange(req.query);
+
+    // Top searched queries
+    const topSearches = await query(`
+      SELECT 
+        query_text,
+        COUNT(*) as search_count,
+        AVG(result_count) as avg_results,
+        COUNT(DISTINCT anonymous_id) as unique_searchers,
+        SUM(CASE WHEN clicked_entity_id != '' THEN 1 ELSE 0 END) as clicks
+      FROM search_queries
+      WHERE created_at >= $1 AND created_at <= $2
+      GROUP BY query_text
+      ORDER BY search_count DESC
+      LIMIT 50
+    `, [since, until]);
+
+    // Failed searches (0 results returned)
+    const failedSearches = await query(`
+      SELECT 
+        query_text,
+        COUNT(*) as attempt_count,
+        MAX(created_at) as last_attempted
+      FROM search_queries
+      WHERE result_count = 0
+        AND created_at >= $1 AND created_at <= $2
+      GROUP BY query_text
+      ORDER BY attempt_count DESC
+      LIMIT 50
+    `, [since, until]);
+
+    res.json({
+      success: true,
+      topSearches: topSearches.rows.map(s => ({
+        ...s,
+        search_count: parseInt(s.search_count || 0),
+        avg_results: Math.round(parseFloat(s.avg_results || 0)),
+        unique_searchers: parseInt(s.unique_searchers || 0),
+        clicks: parseInt(s.clicks || 0)
+      })),
+      failedSearches: failedSearches.rows.map(f => ({
+        ...f,
+        attempt_count: parseInt(f.attempt_count || 0)
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Visitor Journey Flow
+// GET /api/analytics/journeys?range=7&limit=25
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/journeys', requireAdminAuth, async (req, res) => {
+  try {
+    const { since, until } = parseDateRange(req.query);
+    const limit = Math.min(parseInt(req.query.limit) || 25, 100);
+
+    // Get recent sessions
+    const sessions = await query(`
+      SELECT 
+        id, anonymous_id, landing_page, session_start, session_end,
+        device_type, browser, os, duration_seconds, page_count,
+        referrer, utm_source, utm_campaign
+      FROM visitor_sessions
+      WHERE session_start >= $1 AND session_start <= $2
+      ORDER BY session_start DESC
+      LIMIT $3
+    `, [since, until, limit]);
+
+    // For each session, fetch chronological page views & events
+    const sessionIds = sessions.rows.map(s => s.id);
+    let allSteps = [];
+    if (sessionIds.length > 0) {
+      const placeholders = sessionIds.map((_, i) => `$${i + 1}`).join(',');
+      const [pvs, evs] = await Promise.all([
+        query(`
+          SELECT session_id, page_path, page_title, viewed_at as step_time, 'page_view' as step_type, time_on_page
+          FROM page_views
+          WHERE session_id IN (${placeholders})
+          ORDER BY viewed_at ASC
+        `, sessionIds),
+        query(`
+          SELECT session_id, event_type as step_type, entity_id, entity_title, page_path, created_at as step_time, metadata
+          FROM analytics_events
+          WHERE session_id IN (${placeholders})
+          ORDER BY created_at ASC
+        `, sessionIds)
+      ]);
+
+      allSteps = [...pvs.rows, ...evs.rows].sort((a, b) => new Date(a.step_time) - new Date(b.step_time));
+    }
+
+    const journeys = sessions.rows.map(s => {
+      const steps = allSteps.filter(st => st.session_id === s.id);
+      return {
+        ...s,
+        steps: steps.map(st => ({
+          type: st.step_type,
+          path: st.page_path,
+          title: st.page_title || st.entity_title || st.entity_id || '',
+          time: st.step_time,
+          duration: st.time_on_page || 0
+        }))
+      };
+    });
+
+    res.json({ success: true, journeys });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Live Activity Feed (last 50 discrete events)
+// GET /api/analytics/live-feed
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/live-feed', requireAdminAuth, async (req, res) => {
+  try {
+    const recent = await query(`
+      SELECT 
+        ae.id,
+        ae.event_type,
+        ae.entity_title,
+        ae.entity_id,
+        ae.page_path,
+        ae.created_at,
+        vs.anonymous_id,
+        vs.device_type,
+        vs.browser
+      FROM analytics_events ae
+      LEFT JOIN visitor_sessions vs ON ae.session_id = vs.id
+      ORDER BY ae.created_at DESC
+      LIMIT 50
+    `);
+
+    res.json({ success: true, feed: recent.rows, timestamp: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Comprehensive Daily Analytics Report
+// GET /api/analytics/daily-report?range=30
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/daily-report', requireAdminAuth, async (req, res) => {
+  try {
+    const { since, until } = parseDateRange(req.query);
+
+    const [sessions, views, buyClicks, uniqueClickers, downloads] = await Promise.all([
+      query('SELECT COUNT(*) as cnt, COUNT(DISTINCT anonymous_id) as uniques FROM visitor_sessions WHERE session_start >= $1 AND session_start <= $2', [since, until]),
+      query('SELECT COUNT(*) as cnt FROM page_views WHERE viewed_at >= $1 AND viewed_at <= $2', [since, until]),
+      query("SELECT COUNT(*) as cnt FROM analytics_events WHERE event_type = 'buy_now_click' AND created_at >= $1 AND created_at <= $2", [since, until]),
+      query("SELECT COUNT(DISTINCT anonymous_id) as cnt FROM analytics_events WHERE event_type = 'buy_now_click' AND created_at >= $1 AND created_at <= $2", [since, until]),
+      query("SELECT COUNT(*) as cnt FROM analytics_events WHERE event_type = 'document_download' AND created_at >= $1 AND created_at <= $2", [since, until])
+    ]);
+
+    const totalSessions = parseInt(sessions.rows[0]?.cnt || 0);
+    const uniqueVisitors = parseInt(sessions.rows[0]?.uniques || 0);
+    const totalViews = parseInt(views.rows[0]?.cnt || 0);
+    const totalBuyClicks = parseInt(buyClicks.rows[0]?.cnt || 0);
+    const uniqueBuyers = parseInt(uniqueClickers.rows[0]?.cnt || 0);
+    const totalDownloads = parseInt(downloads.rows[0]?.cnt || 0);
+    const overallCtr = uniqueVisitors > 0 ? ((uniqueBuyers / uniqueVisitors) * 100).toFixed(2) : '0.00';
+
+    const report = {
+      generatedAt: new Date().toISOString(),
+      period: { since, until },
+      metrics: {
+        totalSessions,
+        uniqueVisitors,
+        totalPageViews: totalViews,
+        totalBuyNowClicks: totalBuyClicks,
+        uniqueBuyNowClickers: uniqueBuyers,
+        purchaseClickThroughRate: `${overallCtr}%`,
+        datasheetDownloads: totalDownloads
+      }
+    };
+
+    if (req.query.format === 'csv') {
+      const csv = `Metric,Value\nTotal Sessions,${totalSessions}\nUnique Visitors,${uniqueVisitors}\nTotal Page Views,${totalViews}\nBuy Now Clicks,${totalBuyClicks}\nUnique Clickers,${uniqueBuyers}\nPurchase CTR,${overallCtr}%\nDatasheet Downloads,${totalDownloads}\nPeriod Start,${since}\nPeriod End,${until}\n`;
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="oxybott-analytics-report-${new Date().toISOString().slice(0,10)}.csv"`);
+      return res.send(csv);
+    }
+
+    res.json({ success: true, report });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Export CSV (enhanced with custom range support)
 // GET /api/analytics/export
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/export', requireAdminAuth, async (req, res) => {
   try {
-    const days = parseInt(req.query.range) || 30;
-    const since = new Date(Date.now() - days * 86400000).toISOString();
+    const { since, until } = parseDateRange(req.query);
 
     const data = await query(`
       SELECT anonymous_id, session_start, session_end, ip_address, device_type, browser, os,
              referrer, utm_source, utm_medium, utm_campaign, landing_page, page_count,
              duration_seconds, is_new_visitor
-      FROM visitor_sessions WHERE session_start >= $1 ORDER BY session_start DESC
-    `, [since]);
+      FROM visitor_sessions 
+      WHERE session_start >= $1 AND session_start <= $2 
+      ORDER BY session_start DESC
+    `, [since, until]);
 
     const headers = ['Visitor ID', 'Session Start', 'Session End', 'IP (Masked)', 'Device', 'Browser', 'OS', 'Referrer', 'UTM Source', 'UTM Medium', 'UTM Campaign', 'Landing Page', 'Pages Visited', 'Duration (s)', 'New Visitor'];
     const csvRows = data.rows.map(r => [

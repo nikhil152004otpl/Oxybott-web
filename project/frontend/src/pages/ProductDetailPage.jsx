@@ -4,6 +4,7 @@ import { useStore } from '../context/StoreContext';
 import { useCart } from '../context/CartContext';
 import { useToast } from '../context/ToastContext';
 import { StoreAPI } from '../services/api';
+import { trackEvent } from '../utils/analytics';
 import {
   IconPackage,
   IconStar,
@@ -186,7 +187,10 @@ export default function ProductDetailPage() {
                 <button
                   key={idx}
                   type="button"
-                  onClick={() => setSelectedImage(img)}
+                  onClick={() => {
+                    setSelectedImage(img);
+                    trackEvent('gallery_interaction', 'product', product.id, product.name, { imageIndex: idx });
+                  }}
                   style={{
                     border: selectedImage === img ? '2px solid var(--oxy-primary)' : '1px solid var(--oxy-gray-300)',
                     padding: '2px',
@@ -265,6 +269,13 @@ export default function ProductDetailPage() {
                 rel="noopener noreferrer"
                 className="btn btn-orange btn-lg"
                 id="pdpBuyOsemiBtn"
+                onClick={() => {
+                  trackEvent('buy_now_click', 'product', product.id, product.name, {
+                    osemi_url: product.osemi_url,
+                    price: product.price,
+                    sku: product.sku || product.id
+                  });
+                }}
                 style={{
                   flexGrow: 1,
                   display: 'inline-flex',
@@ -330,7 +341,10 @@ export default function ProductDetailPage() {
           <button
             type="button"
             className={`pdp-tab-btn ${activeTab === 'specs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('specs')}
+            onClick={() => {
+              setActiveTab('specs');
+              trackEvent('specs_interaction', 'product', product.id, product.name);
+            }}
           >
             Specifications
           </button>
@@ -482,6 +496,8 @@ export default function ProductDetailPage() {
                                   preload="metadata"
                                   style={{ width: '100%', display: 'block', maxHeight: '280px' }}
                                   src={doc.file_path}
+                                  onPlay={() => trackEvent('video_play', 'video', doc.id, doc.document_title, { product_id: product.id })}
+                                  onEnded={() => trackEvent('video_complete_100', 'video', doc.id, doc.document_title, { product_id: product.id })}
                                 >
                                   Your browser does not support HTML5 video playback.
                                 </video>
@@ -625,6 +641,7 @@ export default function ProductDetailPage() {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="btn btn-outline btn-sm"
+                                onClick={() => trackEvent('document_download', 'document', doc.id, doc.document_title, { product_id: product.id, file_path: doc.file_path, action: 'view' })}
                                 style={{ flex: 1, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', textDecoration: 'none' }}
                               >
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -634,6 +651,7 @@ export default function ProductDetailPage() {
                                 href={`/api/documents/${doc.id}/download`}
                                 download={doc.original_filename}
                                 className="btn btn-primary btn-sm"
+                                onClick={() => trackEvent('document_download', 'document', doc.id, doc.document_title, { product_id: product.id, file_path: doc.file_path, action: 'download' })}
                                 style={{ flex: 1, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', textDecoration: 'none' }}
                               >
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>

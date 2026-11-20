@@ -328,6 +328,42 @@ function getSqliteFallback() {
       );
 
       CREATE INDEX IF NOT EXISTS idx_cc_anonymous_id ON cookie_consents(anonymous_id);
+
+      -- Advanced Analytics Tables
+      CREATE TABLE IF NOT EXISTS analytics_events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        anonymous_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        entity_type TEXT DEFAULT '',
+        entity_id TEXT DEFAULT '',
+        entity_title TEXT DEFAULT '',
+        metadata TEXT DEFAULT '{}',
+        page_path TEXT DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(session_id) REFERENCES visitor_sessions(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ae_session_id ON analytics_events(session_id);
+      CREATE INDEX IF NOT EXISTS idx_ae_event_type ON analytics_events(event_type);
+      CREATE INDEX IF NOT EXISTS idx_ae_entity ON analytics_events(entity_type, entity_id);
+      CREATE INDEX IF NOT EXISTS idx_ae_created_at ON analytics_events(created_at);
+
+      CREATE TABLE IF NOT EXISTS search_queries (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        anonymous_id TEXT NOT NULL,
+        query_text TEXT NOT NULL,
+        result_count INTEGER DEFAULT 0,
+        clicked_entity_id TEXT DEFAULT '',
+        page_path TEXT DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(session_id) REFERENCES visitor_sessions(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sq_query_text ON search_queries(query_text);
+      CREATE INDEX IF NOT EXISTS idx_sq_result_count ON search_queries(result_count);
+      CREATE INDEX IF NOT EXISTS idx_sq_created_at ON search_queries(created_at);
     `);
   }
   return sqliteDb;

@@ -47,8 +47,18 @@ function isNewSession() {
   return isNew;
 }
 
+// ─── Admin exclusion ──────────────────────────────────────────────────────────
+function isAdminUser() {
+  try {
+    return Boolean(localStorage.getItem('oxybott_admin_token')) || window.location.pathname.startsWith('/admin');
+  } catch {
+    return false;
+  }
+}
+
 // ─── Consent check ───────────────────────────────────────────────────────────
 function hasAnalyticsConsent() {
+  if (isAdminUser()) return false; // Exclude internal admin visits from public analytics
   try {
     const prefs = localStorage.getItem('_oxconsent');
     if (!prefs) return false;
@@ -110,6 +120,66 @@ async function trackPageView(path, title) {
   } catch { /* Silent fail – never break frontend */ }
 }
 
+// ─── Custom Event Tracking (Buy Now clicks, downloads, video engagement) ────
+async function trackEvent(eventType, entityType = '', entityId = '', entityTitle = '', metadata = {}) {
+  if (!hasAnalyticsConsent()) return;
+
+  const visitorId = getVisitorId();
+  const sessionId = getSessionId();
+
+  const payload = {
+    visitorId,
+    sessionId,
+    eventType,
+    entityType,
+    entityId,
+    entityTitle,
+    metadata,
+    pagePath: window.location.pathname + window.location.search,
+    consentGiven: true
+  };
+
+  try {
+    await fetch(`${API_BASE}/analytics/event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      keepalive: true
+    });
+  } catch { /* Silent fail */ }
+}
+
+// ─── Internal Search Tracking ────────────────────────────────────────────────
+let searchDebounceTimer = null;
+function trackSearch(queryText, resultCount = 0, clickedEntityId = '') {
+  if (!hasAnalyticsConsent() || !queryText || !queryText.trim()) return;
+
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(async () => {
+    const visitorId = getVisitorId();
+    const sessionId = getSessionId();
+
+    const payload = {
+      visitorId,
+      sessionId,
+      queryText: queryText.trim(),
+      resultCount: parseInt(resultCount) || 0,
+      clickedEntityId,
+      pagePath: window.location.pathname,
+      consentGiven: true
+    };
+
+    try {
+      await fetch(`${API_BASE}/analytics/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true
+      });
+    } catch { /* Silent fail */ }
+  }, 400);
+}
+
 // ─── Consent sync ────────────────────────────────────────────────────────────
 export async function syncConsent(preferences) {
   const visitorId = getVisitorId();
@@ -129,5 +199,5 @@ export async function syncConsent(preferences) {
 }
 
 // ─── Public exports ───────────────────────────────────────────────────────────
-export { trackPageView, getVisitorId };
-export default { trackPageView, syncConsent, getVisitorId };
+export { trackPageView, trackEvent, trackSearch, getVisitorId };
+export default { trackPageView, trackEvent, trackSearch, syncConsent, getVisitorId };

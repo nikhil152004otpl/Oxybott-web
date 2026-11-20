@@ -698,3 +698,146 @@ test('19. Security Monitoring (Admin Security Events, Top IPs, Export)', async (
   assert.equal(exportRes.status, 200);
   assert.equal(exportRes.headers.get('content-type').includes('text/csv'), true);
 });
+
+test('20. Advanced Visitor Intelligence (Interactions, External Clicks, Video & Search Analytics)', async () => {
+  // Public custom interaction: Buy Now Click
+  const buyRes = await fetch(`${baseUrl}/api/analytics/event`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      visitorId: 'test-visitor-uuid-1234',
+      sessionId: 'test-session-uuid-5678',
+      eventType: 'buy_now_click',
+      entityType: 'product',
+      entityId: 'qd001',
+      entityTitle: 'Oxybott QD001 Mecanum Robot Car',
+      metadata: { osemi_url: 'https://osemi.in/product/qd001', price: 2999 },
+      pagePath: '/products/qd001',
+      consentGiven: true
+    })
+  });
+  const buyData = await buyRes.json();
+  assert.equal(buyRes.status, 200);
+  assert.equal(buyData.success, true);
+  assert.ok(buyData.eventId);
+
+  // Public custom interaction: Video Play
+  const vidRes = await fetch(`${baseUrl}/api/analytics/event`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      visitorId: 'test-visitor-uuid-1234',
+      sessionId: 'test-session-uuid-5678',
+      eventType: 'video_play',
+      entityType: 'video',
+      entityId: 'tut-qd001',
+      entityTitle: 'QD001 Assembly Walkthrough',
+      pagePath: '/tutorials',
+      consentGiven: true
+    })
+  });
+  const vidData = await vidRes.json();
+  assert.equal(vidRes.status, 200);
+  assert.equal(vidData.success, true);
+
+  // Public Search: zero result search
+  const searchRes = await fetch(`${baseUrl}/api/analytics/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      visitorId: 'test-visitor-uuid-1234',
+      sessionId: 'test-session-uuid-5678',
+      queryText: 'drone flying kit',
+      resultCount: 0,
+      pagePath: '/',
+      consentGiven: true
+    })
+  });
+  const searchData = await searchRes.json();
+  assert.equal(searchRes.status, 200);
+  assert.equal(searchData.success, true);
+
+  // Admin Top Pages
+  const topPagesRes = await fetch(`${baseUrl}/api/analytics/top-pages?range=30&pageType=all`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const topPagesData = await topPagesRes.json();
+  assert.equal(topPagesRes.status, 200);
+  assert.equal(topPagesData.success, true);
+  assert.ok(Array.isArray(topPagesData.pages));
+
+  // Admin Product Interest & CTR
+  const prodInterestRes = await fetch(`${baseUrl}/api/analytics/products?range=30`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const prodInterestData = await prodInterestRes.json();
+  assert.equal(prodInterestRes.status, 200);
+  assert.equal(prodInterestData.success, true);
+  assert.ok(Array.isArray(prodInterestData.products));
+  const qd001 = prodInterestData.products.find(p => p.id === 'qd001');
+  if (qd001) {
+    assert.ok(qd001.buy_now_clicks >= 1);
+  }
+
+  // Admin External Purchase Clicks Log
+  const extClicksRes = await fetch(`${baseUrl}/api/analytics/external-clicks?range=30`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const extClicksData = await extClicksRes.json();
+  assert.equal(extClicksRes.status, 200);
+  assert.equal(extClicksData.success, true);
+  assert.ok(Array.isArray(extClicksData.clicks));
+
+  // Admin Video Analytics
+  const videosRes = await fetch(`${baseUrl}/api/analytics/videos?range=30`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const videosData = await videosRes.json();
+  assert.equal(videosRes.status, 200);
+  assert.equal(videosData.success, true);
+  assert.ok(Array.isArray(videosData.videos));
+
+  // Admin Search Analytics
+  const searchesRes = await fetch(`${baseUrl}/api/analytics/searches?range=30`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const searchesData = await searchesRes.json();
+  assert.equal(searchesRes.status, 200);
+  assert.equal(searchesData.success, true);
+  assert.ok(Array.isArray(searchesData.failedSearches));
+  const failedDrone = searchesData.failedSearches.find(f => f.query_text === 'drone flying kit');
+  assert.ok(failedDrone);
+
+  // Admin Visitor Journeys
+  const journeysRes = await fetch(`${baseUrl}/api/analytics/journeys?range=30&limit=10`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const journeysData = await journeysRes.json();
+  assert.equal(journeysRes.status, 200);
+  assert.equal(journeysData.success, true);
+  assert.ok(Array.isArray(journeysData.journeys));
+
+  // Admin Live Activity Feed
+  const feedRes = await fetch(`${baseUrl}/api/analytics/live-feed`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const feedData = await feedRes.json();
+  assert.equal(feedRes.status, 200);
+  assert.equal(feedData.success, true);
+  assert.ok(Array.isArray(feedData.feed));
+
+  // Admin Daily Report (JSON and CSV)
+  const reportRes = await fetch(`${baseUrl}/api/analytics/daily-report?range=30`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const reportData = await reportRes.json();
+  assert.equal(reportRes.status, 200);
+  assert.equal(reportData.success, true);
+  assert.ok(reportData.report.metrics);
+
+  const reportCsvRes = await fetch(`${baseUrl}/api/analytics/daily-report?range=30&format=csv`, {
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  assert.equal(reportCsvRes.status, 200);
+  assert.ok(reportCsvRes.headers.get('content-type').includes('text/csv'));
+});

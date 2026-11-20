@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import { StoreAPI, CMSAPI } from '../services/api';
+import { trackEvent } from '../utils/analytics';
 import { IconArrowRight, IconVideo } from '../components/common/Icons';
 
 const DEFAULT_TUTORIALS = [
@@ -128,6 +129,7 @@ export default function TutorialsPage() {
   }, [loadData]);
 
   const handleVideoClick = (tut) => {
+    trackEvent('video_play', 'tutorial_video', tut.id, tut.title, { url: tut.video_url, product_id: tut.product_id });
     const hasYt = tut.video_url && getYouTubeEmbedUrl(tut.video_url);
     const hasFile = Boolean(tut.video_file_path);
 
@@ -141,6 +143,7 @@ export default function TutorialsPage() {
   };
 
   const handleDownload = (filename) => {
+    trackEvent('document_download', 'tutorial_file', filename, filename);
     showToast(`Downloading ${filename}...`);
   };
 
